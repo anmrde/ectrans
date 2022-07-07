@@ -394,7 +394,7 @@ call setup_trans0(kout=nout,kerr=nerr,kprintlev=merge(2, 0, verbose),kmax_resol=
 &                 prad=zra,ldalloperm=.true.,ldmpoff=.not.luse_mpi)
 
 call setup_trans(ksmax=nsmax,kdgl=ndgl,kloen=nloen,ldsplit=.true.,&
-&                 ldusefftw=.false., ldusecc=lusecc, lduserpnm=luserpnm,ldkeeprpnm=lkeeprpnm, &
+&                 ldusefftw=lfftw, ldusecc=lusecc, lduserpnm=luserpnm,ldkeeprpnm=lkeeprpnm, &
 &                 lduseflt=luseflt)
 !
 call trans_inq(kspec2=nspec2,kspec2g=nspec2g,kgptot=ngptot,kgptotg=ngptotg)
@@ -1181,7 +1181,7 @@ subroutine initialize_spectral_arrays(nsmax, zsp, sp3d)
   nfield = size(sp3d, 3)
 
   ! First initialize surface pressure
-  call initialize_2d_spectral_field(nsmax, zspsc2(1,:))
+  call initialize_2d_spectral_field_2(nsmax, zspsc2(1,:))
 
   ! Then initialize all of the 3D fields
   do i = 1, nflevl
@@ -1230,6 +1230,85 @@ subroutine initialize_2d_spectral_field(nsmax, field)
   end if
 
 end subroutine initialize_2d_spectral_field
+!===================================================================================================
+
+subroutine initialize_2d_spectral_field_2(nsmax, field)
+
+  integer,         intent(in)    :: nsmax    ! Spectral truncation
+  real(kind=jprb), intent(inout) :: field(:) ! Field to initialize
+
+  
+  integer :: i, index, num_my_zon_wns
+  integer, allocatable :: my_zon_wns(:), nasm0(:)
+  integer :: im, m_num, l_num
+  
+  ! First initialise all spectral coefficients to zero
+  field(:) = 0.0
+
+  ! Get zonal wavenumbers this rank is responsible for
+  call trans_inq(knump=num_my_zon_wns)
+  allocate(my_zon_wns(num_my_zon_wns))
+  call trans_inq(kmyms=my_zon_wns)
+
+  ! Get array of spectral array addresses (this maps (m, n=m) to array index)
+  allocate(nasm0(0:nsmax))
+  call trans_inq(kasm0=nasm0)
+  
+  ! loop over the zonal wavenumber this rank is responsible for
+  do im=1,num_my_zon_wns
+     m_num=my_zon_wns(im)
+     do l_num=m_num, nsmax
+        ! Find out local array index of chosen spherical harmonic
+        index = nasm0(m_num) + 2 * (l_num - m_num) + 1
+        ! Set the spectral amplitude to (l+1)^{-5/3}*(-1)^m
+        field(index) = (l_num+1)**(-5.0_jprb/3.0_jprb)*((-1)**m_num)
+     end do
+  end do
+
+  return
+  
+end subroutine initialize_2d_spectral_field_2
+!===================================================================================================
+
+subroutine initialize_2d_spectral_field_with_rand(nsmax, field)
+
+  integer,         intent(in)    :: nsmax    ! Spectral truncation
+  real(kind=jprb), intent(inout) :: field(:) ! Field to initialize
+
+  
+  integer :: i, index, num_my_zon_wns
+  integer, allocatable :: my_zon_wns(:), nasm0(:)
+  integer :: im, m_num, l_num
+  real(kind=jprb) :: randvec(0:nsmax)
+  
+  ! First initialise all spectral coefficients to zero
+  field(:) = 0.0
+
+  ! Get zonal wavenumbers this rank is responsible for
+  call trans_inq(knump=num_my_zon_wns)
+  allocate(my_zon_wns(num_my_zon_wns))
+  call trans_inq(kmyms=my_zon_wns)
+
+  ! Get array of spectral array addresses (this maps (m, n=m) to array index)
+  allocate(nasm0(0:nsmax))
+  call trans_inq(kasm0=nasm0)
+  
+  ! loop over the zonal wavenumber this rank is responsible for
+  do im=1,num_my_zon_wns
+     m_num=my_zon_wns(im)
+     ! Generate a vector of random numbers ~ U[0,1]
+     call random_number(randvec(m_num:nsmax))
+     do l_num=m_num, nsmax
+        ! Find out local array index of chosen spherical harmonic
+        index = nasm0(m_num) + 2 * (l_num - m_num) + 1
+        ! Set the spectral amplitude to a random number that follow -5/3 law
+        field(index) = (l_num+1)**(-5.0_jprb/3.0_jprb)*randvec(l_num)
+     end do
+  end do
+
+  return
+  
+end subroutine initialize_2d_spectral_field_with_rand
 
 !===================================================================================================
 
