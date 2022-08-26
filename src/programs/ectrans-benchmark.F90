@@ -1277,8 +1277,8 @@ subroutine initialize_2d_spectral_field_with_rand(nsmax, field)
         if (m_num .eq. 0) then
           field(index  ) = (l_num+1)**(-5.0_jprb/6.0_jprb)*(randvec1(l_num)-0.5_jprb) ! real part?
         else
-          field(index  ) = (l_num+1)**(-5.0_jprb/6.0_jprb)*(randvec1(l_num)-0.5_jprb) ! real part?
-          field(index+1) = (l_num+1)**(-5.0_jprb/6.0_jprb)*(randvec2(l_num)-0.5_jprb) ! imaginary part?
+          field(index-1) = (l_num+1)**(-5.0_jprb/6.0_jprb)*(randvec1(l_num)-0.5_jprb) ! imaginary part?
+          field(index  ) = (l_num+1)**(-5.0_jprb/6.0_jprb)*(randvec2(l_num)-0.5_jprb) ! real part?
         end if
      end do
   end do
