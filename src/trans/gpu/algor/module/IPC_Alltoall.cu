@@ -7,8 +7,8 @@
 
 #include <stdlib.h>
 #include "mpi.h"
-#include "hip/hip_profile.h"
-#include <hip/hip_runtime_api.h>
+#include "cuda_profiler_api.h"
+#include <cuda_runtime_api.h>
 
 #include <unistd.h>
 #include <sched.h>
@@ -22,9 +22,9 @@
 
 //Macro for checking cuda errors following a cuda launch or api call
 #define cudaCheckError() {                                          \
- hipError_t e=hipGetLastError();                                 \
- if(e!=hipSuccess) {                                              \
-   printf("Cuda failure %s:%d: '%s'\n",__FILE__,__LINE__,hipGetErrorString(e));           \
+ cudaError_t e=cudaGetLastError();                                 \
+ if(e!=cudaSuccess) {                                              \
+   printf("Cuda failure %s:%d: '%s'\n",__FILE__,__LINE__,cudaGetErrorString(e));           \
    exit(0); \
  }                                                                 \
 }
@@ -40,7 +40,7 @@ typedef struct ipcDevices_st
 
 
 // we need a seperate CUDA stream for each target GPU
-static hipStream_t streams[MAX_DEVICES];
+static cudaStream_t streams[MAX_DEVICES];
 
 // structure to contain pointers to remote array data, and offsets into each for destinatin data.
 // we maintain 2 copies (first array dimension), corresponding to MTOL and LTOM trans comms.
@@ -60,7 +60,7 @@ extern "C" void initIPC(double* output_d,int* roff, int mtol_or_ltom){
 
 
   for (int i = 0; i < MAX_DEVICES; i++) {
-    hipStreamCreate(&streams[i]);
+    cudaStreamCreate(&streams[i]);
   }
 
 
@@ -71,14 +71,14 @@ extern "C" void initIPC(double* output_d,int* roff, int mtol_or_ltom){
 
 
   // get memory handle for data array local to this MPI process
-  hipIpcMemHandle_t outputhandle;
+  cudaIpcMemHandle_t outputhandle;
 
-  hipIpcGetMemHandle((hipIpcMemHandle_t *) &outputhandle, (void *) output_d);
+  cudaIpcGetMemHandle((cudaIpcMemHandle_t *) &outputhandle, (void *) output_d);
   cudaCheckError();
 
 
   // create a "full" structure to contain handles for all processes.
-  static hipIpcMemHandle_t outputhandleall[MAX_DEVICES];
+  static cudaIpcMemHandle_t outputhandleall[MAX_DEVICES];
 
 
   //copy handle for this processor to full structure
@@ -88,7 +88,7 @@ extern "C" void initIPC(double* output_d,int* roff, int mtol_or_ltom){
  
   //each rank broadcasts its handle to all other ranks
   for (irank=0;irank<size;irank++){
-    MPI_Bcast( &outputhandleall[irank], sizeof(hipIpcMemHandle_t), 
+    MPI_Bcast( &outputhandleall[irank], sizeof(cudaIpcMemHandle_t), 
 	       MPI_BYTE, irank, 
     	       MPI_COMM_WORLD );
     }
@@ -104,9 +104,9 @@ extern "C" void initIPC(double* output_d,int* roff, int mtol_or_ltom){
     }
     else{
       //pointer is remote - use corresponding memory handle
-      hipIpcOpenMemHandle((void **) &outputptrall[mtol_or_ltom][irank], 
+      cudaIpcOpenMemHandle((void **) &outputptrall[mtol_or_ltom][irank], 
 			   outputhandleall[irank],
-			   hipIpcMemLazyEnablePeerAccess);
+			   cudaIpcMemLazyEnablePeerAccess);
       cudaCheckError();
       
     }
@@ -170,7 +170,7 @@ extern "C" int Alltoallv_CUDAIPC(double* input, int* len, int* soff,
     for(targetrank=0;targetrank<size;targetrank++){
 	int canAccessPeer=0;
 	if (targetrank != rank){
-	  hipDeviceCanAccessPeer (&canAccessPeer,rank,targetrank);
+	  cudaDeviceCanAccessPeer (&canAccessPeer,rank,targetrank);
 	  
 	  if (!canAccessPeer){
 	    notFullPeerAccess=1;
@@ -207,13 +207,13 @@ extern "C" int Alltoallv_CUDAIPC(double* input, int* len, int* soff,
 
     int targetrank_=(rank+targetrank)%size; //for better balance
 
-    hipMemcpyAsync(&(outputptrall[mtol_or_ltom][targetrank_][roff_remote[mtol_or_ltom][targetrank_]]),&input[soff[targetrank_]],len[targetrank_]*sizeof(double),hipMemcpyDeviceToDevice,streams[targetrank_]);
+    cudaMemcpyAsync(&(outputptrall[mtol_or_ltom][targetrank_][roff_remote[mtol_or_ltom][targetrank_]]),&input[soff[targetrank_]],len[targetrank_]*sizeof(double),cudaMemcpyDeviceToDevice,streams[targetrank_]);
 
   }
   
   // sync all streams
   for(targetrank=0;targetrank<size;targetrank++)
-    hipStreamSynchronize(streams[targetrank]);
+    cudaStreamSynchronize(streams[targetrank]);
   
   
   cudaCheckError();

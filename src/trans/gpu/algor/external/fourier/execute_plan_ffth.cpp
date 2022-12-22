@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "execute_plan_ffth.hip.h"
+#include "execute_plan_ffth.cuda.h"
 
 extern "C" {
 
@@ -14,7 +14,7 @@ void execute_plan_ffth_c_(int ISIGNp, int N, DATA_TYPE *data_in, DATA_TYPE *data
 {	
 #pragma omp target data use_device_ptr(data_in,data_out)
 {*/
-    hipfunction(ISIGNp,N,data_in,data_out,iplan);
+    cudafunction(ISIGNp,N,data_in,data_out,iplan);
 /*}}
     for (int i = 0; i < N; i++)
     {

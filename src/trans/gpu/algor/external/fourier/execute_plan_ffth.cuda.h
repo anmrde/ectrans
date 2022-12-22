@@ -6,5 +6,5 @@ typedef double DATA_TYPE;
 
 #ifndef FUNCTIONS_H_INCLUDED
 #define FUNCTIONS_H_INCLUDED
-void hipfunction(int ISIGNp, int N, DATA_TYPE *data_in, DATA_TYPE *data_out, long *iplan);
+void cudafunction(int ISIGNp, int N, DATA_TYPE *data_in, DATA_TYPE *data_out, long *iplan);
 #endif

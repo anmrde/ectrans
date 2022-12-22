@@ -43,17 +43,6 @@ endif()
 
 ecbuild_list_exclude_pattern( LIST trans_src            REGEX dilatation_mod.F90 )
 
-ecbuild_list_add_pattern( LIST trans_hip_src
-                          GLOB
-                                sharedmem/*.hip.cpp
-                                algor/*.hip.cpp
-                                internal/*.hip.cpp
-                                external/*.hip.cpp
-                          QUIET
-                        )
-                ecbuild_warn_var(trans_hip_src)
-                set_source_files_properties( ${trans_hip_src} PROPERTIES COMPILE_FLAGS "--offload-arch=gfx90a -x hip" )
-
 foreach( prec sp )
   if( HAVE_${prec} )
     foreach( gpumethod acc)
@@ -72,13 +61,12 @@ foreach( prec sp )
                           $<INSTALL_INTERFACE:include>
           PUBLIC_LIBS      parkind_${prec}
                           fiat
-          PRIVATE_LIBS    hipfft
-                          hipblas
+          PRIVATE_LIBS    CUDA::cufft
+                          CUDA::cublas
                           MPI::MPI_Fortran
-                          #MPI::MPI_C
-			  MPI::MPI_CXX
-                          #nvhpcwrapnvtx
-                          #${LAPACK_LIBRARIES}
+                          MPI::MPI_C
+                          nvhpcwrapnvtx
+                          ${LAPACK_LIBRARIES}
         )
 
         target_link_options   ( trans_gpu_object_${prec}_${gpumethod} INTERFACE "$<$<LINK_LANG_AND_ID:Fortran,NVHPC>:${${gpumethod}_link_flags}>" )
@@ -133,3 +121,4 @@ foreach( prec sp )
     endforeach()
   endif()
 endforeach()
+
