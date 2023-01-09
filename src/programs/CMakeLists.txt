@@ -47,6 +47,7 @@ foreach( prec sp )
           if( gpumethod STREQUAL acc )
             ecbuild_add_executable(TARGET  ectrans-benchmark-gpu-${prec}-${gpumethod}
                                   SOURCES ectrans-benchmark.F90
+                                  LINKER_LANGUAGE Fortran
                                   LIBS
                                     fiat
                                     parkind_${prec}

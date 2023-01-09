@@ -21,10 +21,15 @@ float **Carray_sgemm;
 
 cublasHandle_t handle_sgemm;	
 
+__global__ void helloCUDA(float f)
+{
+    printf("Hello thread %d, f=%f\n", threadIdx.x, f);
+}
+
 extern "C" void cublasSgemmBatched_wrapper (char transa, char transb, int m, int n,int k, float alpha, const float *A, int lda, int tda, const float *B, int ldb, int tdb, float beta, float *C, int ldc, int tdc, int batchCount)
 {
 
-   printf("CUBLAS m=%d,n=%d,k=%d,batchcount=%d\n",m,n,k,batchCount);
+   printf("cublasSgemmBatched_wrapper: CUBLAS m=%d,n=%d,k=%d,batchcount=%d\n",m,n,k,batchCount);
    //exit;
   cublasOperation_t op_t1=CUBLAS_OP_N, op_t2=CUBLAS_OP_N;
 
@@ -64,6 +69,8 @@ extern "C" void cublasSgemmBatched_wrapper (char transa, char transb, int m, int
   cudaMemcpy(d_Barray_sgemm,Barray_sgemm,batchCount*sizeof(float*),cudaMemcpyHostToDevice);
   cudaMemcpy(d_Carray_sgemm,Carray_sgemm,batchCount*sizeof(float*),cudaMemcpyHostToDevice);
 
+    //helloCUDA<<<1, 1>>>(alpha);
+    //cudaDeviceSynchronize();
   cublasSgemmBatched(handle_sgemm,op_t1,op_t2,m,n,k,&alpha,(const float**) d_Aarray_sgemm,lda, (const float**) d_Barray_sgemm,ldb,&beta,(float**) d_Carray_sgemm,ldc,batchCount);
 
   //printf("after sgemm\n");
@@ -84,8 +91,10 @@ extern "C" void cublasSgemmStridedBatched_wrapper (char transa, char transb, int
 {
 
 
-  printf("CUBLAS m=%d,n=%d,k=%d,batchcount=%d\n",m,n,k,batchCount);
-  exit;
+    helloCUDA<<<1, 5>>>(*A);
+    cudaDeviceSynchronize();
+  printf("cublasSgemmStridedBatched_wrapper: CUBLAS m=%d,n=%d,k=%d,batchcount=%d\n",m,n,k,batchCount);
+  //exit;
  
   cublasOperation_t op_t1=CUBLAS_OP_N, op_t2=CUBLAS_OP_N;
 

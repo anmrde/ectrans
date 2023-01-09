@@ -62,7 +62,7 @@ integer(kind=jpim), parameter :: noutdump = 7 ! Unit number for field output
 
 ! Default parameters
 integer(kind=jpim) :: nsmax   = 79  ! Spectral truncation
-integer(kind=jpim) :: iters   = 10  ! Number of iterations for transform test
+integer(kind=jpim) :: iters   = 1  ! Number of iterations for transform test
 integer(kind=jpim) :: nfld    = 1   ! Number of scalar fields 
 integer(kind=jpim) :: nlev    = 1   ! Number of vertical levels
 
@@ -230,7 +230,7 @@ luse_mpi = detect_mpirun()
 call get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, lscders, luvders, luseflt, nproma, verbose, ldump_values)
 if (cgrid == '') cgrid = cubic_octahedral_gaussian_grid(nsmax)
 call parse_grid(cgrid,ndgl,nloen)
-nflevg = nfld
+nflevg = nlev !nfld
 
 !===================================================================================================
 
@@ -383,6 +383,7 @@ icode = 0
 
 if (verbose) then
   write(nout,'(a)')'======= Setup ectrans ======='
+  call flush(nout)
 endif
 
 call setup_trans0(kout=nout,kerr=nerr,kprintlev=merge(2, 0, verbose),kmax_resol=nmax_resol, &
@@ -391,7 +392,7 @@ call setup_trans0(kout=nout,kerr=nerr,kprintlev=merge(2, 0, verbose),kmax_resol=
 &                 ldeq_regions=leq_regions, &
 &                 prad=zra,ldalloperm=.true.,ldmpoff=.not.luse_mpi)
 
-call setup_trans(ksmax=nsmax,kdgl=ndgl,kloen=nloen,ldsplit=.true.,&
+call setup_trans(ksmax=nsmax,kflev=nflevg,kdgl=ndgl,kloen=nloen,ldsplit=.true.,&
 &                 ldusefftw=.false., lduserpnm=luserpnm,ldkeeprpnm=lkeeprpnm, &
 &                 lduseflt=luseflt)
 !
@@ -437,6 +438,7 @@ if ( myproc == 1) then
   write(nout,'(" ")')
   write(nout,'(a)') '======= End of runtime parameters ======='
   write(nout,'(" ")')
+  call flush(nout)
 end if
 
 !===================================================================================================
@@ -549,6 +551,7 @@ if( verbose ) then
     do ifld=1,nflevg
       write(nout,'("t   znorm(",i4,")=",f20.15)') ifld,znormt1(ifld)
     enddo
+    call flush(nout)
   endif
 endif
 
@@ -562,6 +565,7 @@ if (verbose .and. myproc == 1) then
   write(nout,'(a,i6,a,f9.2,a)') "transform_test initialisation, on",nproc,&
                                 & " tasks, took",ztinit," sec"
   write(nout,'(" ")')
+  call flush(nout)
 end if
 
 if(iters<=0) call abor1('transform_test:iters <= 0')
@@ -583,6 +587,7 @@ ztstepmin2=9999999999999999._jprd
 if (verbose .and. myproc == 1) then
   write(nout,'(a)') '======= Start of spectral transforms  ======='
   write(nout,'(" ")')
+  call flush(nout)
 end if
 
 if( lstats ) then
@@ -610,6 +615,11 @@ do jstep=1,iters
   !=================================================================================================
 
   ztstep1(jstep)=timef()
+  if (verbose .and. myproc == 1) then
+    write(nout,'(a)') '======= inverse spectral transforms  ======='
+    write(nout,'(" ")')
+    call flush(nout)
+  end if
 
   if( lvordiv ) then
     call inv_trans(kresol=1, kproma=nproma,&
@@ -657,6 +667,11 @@ do jstep=1,iters
   !=================================================================================================
 
   ztstep2(jstep)=timef()
+  if (verbose .and. myproc == 1) then
+    write(nout,'(a)') '======= direct spectral transforms  ======='
+    write(nout,'(" ")')
+    call flush(nout)
+  end if
 
   if (lvordiv) then
     call dir_trans(kresol=1, kproma=nproma,&
@@ -734,10 +749,12 @@ do jstep=1,iters
       write(nout,'("time step ",i6," took", f8.4," | sp max err="e10.3,&
                  & " | div max err="e10.3," | vor max err="e10.3," | t max err="e10.3)') &
                  &  jstep,ztstep(jstep),zmaxerr(1),zmaxerr(2),zmaxerr(3),zmaxerr(4)
+      call flush(nout)
     endif
   else
     if (verbose .and. myproc == 1) then
       write(nout,'("time step ",i6," took", f8.4)') jstep,ztstep(jstep)
+      call flush(nout)
     end if
   endif
 enddo
@@ -748,6 +765,7 @@ if (verbose .and. myproc == 1) then
   write(nout,'(" ")')
   write(nout,'(a)') '======= End of spectral transforms  ======='
   write(nout,'(" ")')
+  call flush(nout)
 end if
 
 
@@ -764,24 +782,28 @@ if( verbose ) then
       zerr(1)=abs(znormsp1(ifld)/znormsp(ifld)-1.0d0)
       zmaxerr(1)=max(zmaxerr(1),zerr(1))
       write(nout,'("sp znorm(",i4,")=",f20.15," err=",e10.3)') ifld,znormsp(ifld),zerr(1)
+      call flush(nout)
     enddo
     ! divergence
     do ifld=1,nflevg
       zerr(2)=abs(znormdiv1(ifld)/znormdiv(ifld)-1.0d0)
       zmaxerr(2)=max(zmaxerr(2),zerr(2))
       write(nout,'("div znorm(",i4,")=",f20.15," err=",e10.3)') ifld,znormdiv(ifld),zerr(2)
+      call flush(nout)
     enddo
     ! vorticity
     do ifld=1,nflevg
       zerr(3)=abs(znormvor1(ifld)/znormvor(ifld)-1.0d0)
       zmaxerr(3)=max(zmaxerr(3),zerr(3))
       write(nout,'("vor znorm(",i4,")=",f20.15," err=",e10.3)') ifld,znormvor(ifld),zerr(3)
+      call flush(nout)
     enddo
     ! temperature
     do ifld=1,nflevg
       zerr(4)=abs(znormt1(ifld)/znormt(ifld)-1.0d0)
       zmaxerr(4)=max(zmaxerr(4),zerr(4))
       write(nout,'("t znorm(",i4,")=",f20.15," err=",e10.3)') ifld,znormt(ifld),zerr(4)
+      call flush(nout)
     enddo
     ! maximum error across all fields
     zmaxerrg=max(max(zmaxerr(1),zmaxerr(2)),max(zmaxerr(2),zmaxerr(3)))
@@ -791,6 +813,7 @@ if( verbose ) then
     write(nout,'("vorticity        max error=",e10.3)')zmaxerr(3)
     write(nout,'("temperature      max error=",e10.3)')zmaxerr(4)
     write(nout,'("global           max error=",e10.3)')zmaxerrg
+    call flush(nout)
 
   endif
 endif
@@ -860,6 +883,7 @@ if (verbose .and. myproc == 1) then
   write(nout,'(" ")')
   write(nout,'(a)') '======= End of time step stats ======='
   write(nout,'(" ")')
+  call flush(nout)
 endif
 
 if( lstack ) then
@@ -1168,9 +1192,11 @@ subroutine initialize_spectral_arrays(nsmax, zsp, sp3d)
 
   ! First initialize surface pressure
   call initialize_2d_spectral_field(nsmax, zspsc2(1,:))
+  !zspsc2(1,:) = 1.0
 
   ! Then initialize all of the 3D fields
   do i = 1, nflevl
+    !sp3d(:,:,1:2) = 1.0
     do j = 1, nfield
       call initialize_2d_spectral_field(nsmax, sp3d(i,:,j))
     end do

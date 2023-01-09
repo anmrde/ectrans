@@ -70,7 +70,7 @@ INTERFACE
         USE ISO_C_BINDING
         CHARACTER(1,C_CHAR),  VALUE            :: CTA, CTB
         INTEGER(C_INT),       VALUE            :: M, N, K, LDA, LDB, LDC, BATCHCOUNT
-        INTEGER(C_LONG_LONG), VALUE            :: TDA,TDB,TDC
+        INTEGER(C_INT), VALUE            :: TDA,TDB,TDC
         REAL(C_DOUBLE),        VALUE            :: ALPHA, BETA
         REAL(C_DOUBLE),        DIMENSION(LDA,*) :: A
         REAL(C_DOUBLE),        DIMENSION(LDB,*) :: B
@@ -96,7 +96,9 @@ INTERFACE
     &) BIND(C, NAME='cublasSgemmBatched_wrapper')
         USE ISO_C_BINDING
         CHARACTER(1,C_CHAR), VALUE            :: CTA, CTB
-        INTEGER(C_INT),      VALUE            :: M, N, K, LDA, LDB, LDC, TDA, TDB, TDC, BATCHCOUNT
+        !INTEGER(C_INT),      VALUE            :: M, N, K, LDA, LDB, LDC, TDA, TDB, TDC, BATCHCOUNT
+        INTEGER(C_INT),       VALUE            :: M, N, K, LDA, LDB, LDC, BATCHCOUNT
+        INTEGER(C_INT), VALUE            :: TDA,TDB,TDC
         REAL(C_FLOAT),       VALUE            :: ALPHA, BETA
         REAL(C_FLOAT),       DIMENSION(LDA,*) :: A
         REAL(C_FLOAT),       DIMENSION(LDB,*) :: B
@@ -118,7 +120,7 @@ INTERFACE
         USE ISO_C_BINDING
         CHARACTER(1,C_CHAR),  VALUE            :: CTA, CTB
         INTEGER(C_INT),       VALUE            :: M, N, K, LDA, LDB, LDC, BATCHCOUNT
-        INTEGER(C_LONG_LONG), VALUE            :: TDA,TDB,TDC
+        INTEGER(C_INT), VALUE            :: TDA,TDB,TDC
         REAL(C_FLOAT),        VALUE            :: ALPHA, BETA
         REAL(C_FLOAT),        DIMENSION(LDA,*) :: A
         REAL(C_FLOAT),        DIMENSION(LDB,*) :: B

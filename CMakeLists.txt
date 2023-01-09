@@ -32,7 +32,7 @@ ecbuild_add_option( FEATURE OMP
                     REQUIRED_PACKAGES "OpenMP COMPONENTS Fortran" )
 
 ecbuild_add_option( FEATURE DOUBLE_PRECISION
-                    DEFAULT ON
+                    DEFAULT OFF
                     DESCRIPTION "Support for Double Precision" )
 
 ecbuild_add_option( FEATURE SINGLE_PRECISION
