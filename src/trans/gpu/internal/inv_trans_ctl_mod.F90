@@ -94,7 +94,7 @@ USE SHUFFLE_MOD     ,ONLY : SHUFFLE
 USE FIELD_SPLIT_MOD ,ONLY : FIELD_SPLIT
 USE LTINV_CTL_MOD   ,ONLY : LTINV_CTL
 USE FTINV_CTL_MOD   ,ONLY : FTINV_CTL
-!use nvtx
+use nvtx
 !
 
 IMPLICIT NONE
@@ -288,15 +288,15 @@ ELSE
 #endif
   ! No splitting of fields, transform done in one go
   ! from PSPXXX to FOUBUF
-  !call nvtxStartRange("LTINV")
+  call nvtxStartRange("LTINV")
   CALL LTINV_CTL(KF_OUT_LT,KF_UV,KF_SCALARS,KF_SCDERS, &
    &PSPVOR=PSPVOR,PSPDIV=PSPDIV,PSPSCALAR=PSPSCALAR,&
    &PSPSC3A=PSPSC3A,PSPSC3B=PSPSC3B,PSPSC2=PSPSC2,&
    &FSPGL_PROC=FSPGL_PROC)
-  !call nvtxEndRange
+  call nvtxEndRange
 
   ! from FOUBUF to PGPXXX
-  !call nvtxStartRange("FTINV")
+  call nvtxStartRange("FTINV")
   CALL FTINV_CTL(KF_UV_G,KF_SCALARS_G,&
    & KF_UV,KF_SCALARS,KF_SCDERS,KF_GP,KF_FS,KF_OUT_LT,&
    & KVSETUV=KVSETUV,KVSETSC=KVSETSC,&
@@ -308,7 +308,7 @@ ELSE
 #ifdef ACCGPU
   !$ACC END DATA
 #endif
-   !call nvtxEndRange
+   call nvtxEndRange
 
    !call nvtxEndRange
 

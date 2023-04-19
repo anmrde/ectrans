@@ -43,7 +43,7 @@ endif()
 
 ecbuild_list_exclude_pattern( LIST trans_src            REGEX dilatation_mod.F90 )
 
-foreach( prec sp )
+foreach( prec sp dp )
   if( HAVE_${prec} )
     foreach( gpumethod acc)
       if( HAVE_${gpumethod})

@@ -151,6 +151,7 @@ IF(NPROC > 1) THEN
   !$ACC DATA PRESENT(PFBUF_IN, PFBUF)
 #endif
 #ifdef OMPGPU
+  !WARNING: following ALLOC statements should be PRESENT,ALLOC but cause issues with AMD compiler!
   !$OMP TARGET DATA MAP(ALLOC:PFBUF_IN, PFBUF)
 #endif
 #ifdef ACCGPU
@@ -187,6 +188,7 @@ ELSE
   ISTA = D%NSTAGT0B(MYSETW)*KFIELD+1
   CALL GSTATS(1608,0)
 #ifdef OMPGPU
+  !WARNING: following ALLOC statements should be PRESENT,ALLOC but cause issues with AMD compiler!
   !$OMP TARGET PARALLEL DO DEFAULT(NONE) MAP(ALLOC:PFBUF,PFBUF_IN) &
   !$OMP& SHARED(ISTA,ILEN,PFBUF,PFBUF_IN)
 #endif

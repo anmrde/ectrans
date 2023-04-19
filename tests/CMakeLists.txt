@@ -46,7 +46,7 @@ if( TEST ectrans_test_adjoint AND HAVE_OMP )
   target_link_libraries( ectrans_test_adjoint OpenMP::OpenMP_Fortran )
 endif()
 
-foreach( prec sp )
+foreach( prec sp dp )
   foreach( mpi 0 1 2 )
     set( nthreads 1 )
     if( HAVE_OMP )
