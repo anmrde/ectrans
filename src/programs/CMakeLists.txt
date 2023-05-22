@@ -31,7 +31,7 @@ if( HAVE_TOOLS )
 endif()
 
 
-foreach( prec sp dp )
+foreach( prec sp )
   if( HAVE_${prec} )
     ecbuild_add_executable(TARGET  ectrans-benchmark-${prec}
                           SOURCES ectrans-benchmark.F90
