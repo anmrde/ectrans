@@ -45,6 +45,8 @@ use oml_mod ,only : oml_max_threads
 use mpl_module
 use yomgstats, only: jpmaxstat
 use yomhook, only : dr_hook_init
+use iso_c_binding, only: c_double, c_int
+use ectrans_init_spherical_harmonic_mod, only : ectrans_init_spherical_harmonic
 
 implicit none
 
@@ -79,6 +81,8 @@ integer(kind=jpim) :: i
 integer(kind=jpim) :: ja
 integer(kind=jpim) :: ib
 integer(kind=jpim) :: jprtrv
+integer(kind=jpim) :: n_regions_ns
+integer(kind=jpim) :: n_regions_ew
 
 integer(kind=jpim), allocatable :: nloen(:), nprcids(:)
 integer(kind=jpim) :: myproc, jj, jf, ilf
@@ -107,6 +111,7 @@ real(kind=jprb), pointer :: zspdiv(:,:) => null()
 real(kind=jprb), pointer :: zspsc3a(:,:,:) => null()
 real(kind=jprb), allocatable :: zspsc2(:,:)
 real(kind=jprb), allocatable :: zave(:),zmin(:),zmax(:),zreel(:,:,:)
+real(kind=c_double), allocatable :: zgelam(:,:),zgelat(:,:),zsph_analytic(:,:)
 
 logical :: lstack = .false. ! Output stack info
 logical :: luserpnm = .false.
@@ -397,7 +402,8 @@ call gstats(1, 0)
 call setup_trans0(kout=nout, kerr=nerr, kprintlev=merge(2, 0, verbosity == 1),                &
   &               kmax_resol=nmax_resol, kpromatr=npromatr, kprgpns=nprgpns, kprgpew=nprgpew, &
   &               kprtrw=nprtrw, kcombflen=ncombflen, ldsync_trans=lsync_trans,               &
-  &               ldeq_regions=leq_regions, prad=zra, ldalloperm=.true., ldmpoff=.not.luse_mpi)
+  &               ldeq_regions=leq_regions, prad=zra, ldalloperm=.true.,                      &
+  &               ldmpoff=.not.luse_mpi, k_regions_ns=n_regions_ns, k_regions_ew=n_regions_ew)
 call gstats(1, 1)
 
 call gstats(2, 0)
@@ -528,6 +534,10 @@ allocate(zgmvs(nproma,ndimgmvs,ngpblks))
 zgpuv => zgmv(:,:,1:jend_vder_EW,:)
 zgp3a => zgmv(:,:,jbegin_sc:jend_scder_EW,:)
 zgp2  => zgmvs(:,:,:)
+
+allocate(zgelam(nproma,ngpblks),zgelat(nproma,ngpblks),zsph_analytic(nproma,ngpblks))
+call calc_gelam_gelat(zgelam, zgelat)
+call compute_analytic_solution(zgelam, zgelat, 0, 0, zsph_analytic)
 
 !===================================================================================================
 ! Allocate norm arrays
@@ -1397,6 +1407,78 @@ subroutine initialize_2d_spectral_field(nsmax, field)
   end if
 
 end subroutine initialize_2d_spectral_field
+
+!===================================================================================================
+
+subroutine calc_gelam_gelat(gelam, gelat)
+
+  implicit none
+
+  real(kind=c_double), dimension(nproma,ngpblks), intent(out) :: gelam, gelat
+  integer(kind=jpim) :: nptrfloff, my_region_ns, my_region_ew
+  integer(kind=jpim) :: jglat, ioff, ilat, istlon, iendlon, jlon, jrof, ibl
+  integer(kind=jpim), dimension(n_regions_ns) :: nfrstlat, nlstlat
+  integer(kind=jpim), dimension(ndgl+n_regions_ew-1,n_regions_ew) :: nsta, nonl
+  real(kind=jprd), dimension(ndgl) :: zmu
+  real(kind=c_double) :: zlat, zlon
+  real(kind=c_double) :: rpi = 2.0_c_double*asin(1.0_c_double)
+
+  call trans_inq(kptrfloff=nptrfloff, &
+     & kmy_region_ns=my_region_ns,    &
+     & kmy_region_ew=my_region_ew,    &
+     & kfrstlat=nfrstlat,             &
+     & klstlat=nlstlat,               &
+     & ksta=nsta,                     &
+     & konl=nonl,                     &
+     & pmu=zmu)
+
+  ilat = nptrfloff
+  ibl  = 1
+  jrof = 1
+  do jglat = nfrstlat(my_region_ns), nlstlat(my_region_ns)
+    zlat = asin(zmu(jglat))
+    ilat = ilat + 1
+    istlon = nsta(ilat,my_region_ew)
+    iendlon = nonl(ilat,my_region_ew)
+    do jlon = istlon, iendlon
+      zlon = real(jlon-1,c_double)*2.0_c_double*rpi/real(nloen(jglat),c_double)
+      gelam(jrof,ibl) = zlon
+      gelat(jrof,ibl) = zlat
+      jrof = jrof + 1
+      if(jrof > nproma) then
+        jrof = 1
+        ibl  = ibl + 1
+      end if
+    end do
+  end do
+
+  print*,"calc_gelam_gelat finished"
+
+end subroutine calc_gelam_gelat
+
+!===================================================================================================
+
+subroutine compute_analytic_solution(gelam, gelat, n, m, sph_analytic)
+
+  implicit none
+
+  real(kind=c_double), dimension(nproma,ngpblks), intent(in) :: gelam, gelat
+  real(kind=c_double), dimension(nproma,ngpblks), intent(out) :: sph_analytic
+  integer(kind=jpim), intent(in) :: n, m
+  integer(kind=jpim) :: jkglo, iend, ioff, ibl, jrof
+
+  do jkglo=1,ngptot,nproma
+    iend = min(nproma,ngptot-jkglo+1)
+    ioff = jkglo - 1
+    ibl  = (jkglo-1)/nproma+1
+    do jrof=1,iend
+      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic( n, m, gelam(jrof,ibl), gelat(jrof,ibl))
+    end do
+  end do
+
+  print*,"analytic solution computed"
+
+end subroutine compute_analytic_solution
 
 !===================================================================================================
 

@@ -22,7 +22,7 @@ if( HAVE_TOOLS )
 
     ecbuild_add_executable(TARGET ${_program}
       SOURCES ${_program}.F90
-      LIBS ${trans}
+      LIBS ${trans} ectrans_init_spherical_harmonic
       LINKER_LANGUAGE Fortran
       DEFINITIONS ECTRANS_TOOLS_RTABLE_PATH="${ECTRANS_TOOLS_RTABLE_PATH}" )
 
@@ -39,6 +39,7 @@ foreach( prec sp )
                             fiat
                             parkind_${prec}
                             trans_${prec}
+                            ectrans_init_spherical_harmonic
                           )
 
     if( HAVE_GPU )
@@ -52,6 +53,7 @@ foreach( prec sp )
                                     fiat
                                     parkind_${prec}
                                     trans_gpu_${prec}_${gpumethod}
+                                    ectrans_init_spherical_harmonic
                                     OpenACC::OpenACC_Fortran
                                   )
             target_compile_definitions( ectrans-benchmark-gpu-${prec}-${gpumethod} PRIVATE ACCGPU )
@@ -65,6 +67,7 @@ foreach( prec sp )
                                     fiat
                                     parkind_${prec}
                                     trans_gpu_${prec}_${gpumethod}
+                                    ectrans_init_spherical_harmonic
                                   )
             target_compile_definitions( ectrans-benchmark-gpu-${prec}-${gpumethod} PRIVATE OMPGPU )
           endif()
