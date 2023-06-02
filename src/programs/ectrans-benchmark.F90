@@ -46,7 +46,7 @@ use mpl_module
 use yomgstats, only: jpmaxstat
 use yomhook, only : dr_hook_init
 use iso_c_binding, only: c_double, c_int
-use ectrans_init_spherical_harmonic_mod, only : ectrans_init_spherical_harmonic
+use ectrans_init_spherical_harmonic_mod, only : ectrans_init_spherical_harmonic, ectrans_init_spherical_harmonic_eastwest_derivative, ectrans_init_spherical_harmonic_northsouth_derivative, ectrans_init_spherical_harmonic_hardcoded
 
 implicit none
 
@@ -67,7 +67,9 @@ integer(kind=jpim) :: nsmax   = 79  ! Spectral truncation
 integer(kind=jpim) :: iters   = 10  ! Number of iterations for transform test
 integer(kind=jpim) :: nfld    = 1   ! Number of scalar fields 
 integer(kind=jpim) :: nlev    = 1   ! Number of vertical levels
-
+integer(kind=jpim) :: nzonal  = 0   ! zonal wavenumber to be tested
+integer(kind=jpim) :: ntotal  = 1   ! total wavenumber to be tested
+logical            :: limag = .false. ! test imaginary part of spectral data
 integer(kind=jpim) :: nflevg
 integer(kind=jpim) :: ndgl ! Number of latitudes
 integer(kind=jpim) :: nspec2
@@ -111,7 +113,7 @@ real(kind=jprb), pointer :: zspdiv(:,:) => null()
 real(kind=jprb), pointer :: zspsc3a(:,:,:) => null()
 real(kind=jprb), allocatable :: zspsc2(:,:)
 real(kind=jprb), allocatable :: zave(:),zmin(:),zmax(:),zreel(:,:,:)
-real(kind=c_double), allocatable :: zgelam(:,:),zgelat(:,:),zsph_analytic(:,:)
+real(kind=c_double), allocatable :: zgelam(:,:),zgelat(:,:),zsph_analytic(:,:),zewde_analytic(:,:),znsde_analytic(:,:)
 
 logical :: lstack = .false. ! Output stack info
 logical :: luserpnm = .false.
@@ -230,7 +232,7 @@ luse_mpi = detect_mpirun()
 
 ! Setup
 call get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, lscders, luvders, lgpnorms, &
-  & luseflt, nproma, verbosity, ldump_values, lprint_norms, lmeminfo, nprtrv, nprtrw, ncheck)
+  & luseflt, nproma, verbosity, ldump_values, lprint_norms, lmeminfo, nprtrv, nprtrw, ncheck, ntotal, nzonal, limag)
 if (cgrid == '') cgrid = cubic_octahedral_gaussian_grid(nsmax)
 call parse_grid(cgrid, ndgl, nloen)
 nflevg = nlev
@@ -448,6 +450,9 @@ if (verbosity >= 0) then
   write(nout,'("ngpblks   ",i0)') ngpblks
   write(nout,'("nspec2    ",i0)') nspec2
   write(nout,'("nspec2g   ",i0)') nspec2g
+  write(nout,'("nzonal    ",i0)') nzonal
+  write(nout,'("ntotal    ",i0)') ntotal
+  write(nout,'("limag     ",l)') limag
   write(nout,'("luseflt   ",l)') luseflt
   write(nout,'("lvordiv   ",l)') lvordiv
   write(nout,'("lscders   ",l)') lscders
@@ -470,7 +475,7 @@ nullify(zspsc3a)
 allocate(sp3d(nflevl,nspec2,2+nfld))
 allocate(zspsc2(1,nspec2))
 
-call initialize_spectral_arrays(nsmax, zspsc2, sp3d)
+call initialize_spectral_arrays(nsmax, zspsc2, sp3d, nzonal, ntotal, limag)
 
 ! Point convenience variables to storage variable sp3d
 zspvor  => sp3d(:,:,1)
@@ -535,9 +540,9 @@ zgpuv => zgmv(:,:,1:jend_vder_EW,:)
 zgp3a => zgmv(:,:,jbegin_sc:jend_scder_EW,:)
 zgp2  => zgmvs(:,:,:)
 
-allocate(zgelam(nproma,ngpblks),zgelat(nproma,ngpblks),zsph_analytic(nproma,ngpblks))
+allocate(zgelam(nproma,ngpblks),zgelat(nproma,ngpblks),zsph_analytic(nproma,ngpblks),zewde_analytic(nproma,ngpblks),znsde_analytic(nproma,ngpblks))
 call calc_gelam_gelat(zgelam, zgelat)
-call compute_analytic_solution(zgelam, zgelat, 0, 0, zsph_analytic)
+call compute_analytic_solution(zgelam, zgelat, nzonal, ntotal, limag, zsph_analytic)
 
 !===================================================================================================
 ! Allocate norm arrays
@@ -635,13 +640,39 @@ do jstep = 1, iters
       ilf = 1
     endif
     allocate(zreel(nproma,3,ngpblks))
-    zreel(:,:,:)=0._jprb
-    call inv_trans(kresol=1, kproma=nproma, &
-       & pspscalar=zspsc2(1:ilf,:),         & ! spectral scalar
-       & ldscders=.true.,                   & ! scalar derivatives
-       & kvsetsc=ivsetsc,                   &
-       & pgp=zreel)
-
+    do ntotal = 1,nsmax
+      do nzonal = 1,ntotal
+        zreel(:,:,:)=0._jprb
+        call initialize_spectral_arrays(nsmax, zspsc2, sp3d, nzonal, ntotal, limag)
+        call inv_trans(kresol=1, kproma=nproma, &
+          & pspscalar=zspsc2(1:ilf,:),         & ! spectral scalar
+          & ldscders=.true.,                   & ! scalar derivatives
+          & kvsetsc=ivsetsc,                   &
+          & pgp=zreel)
+        call compute_analytic_solution(zgelam, zgelat, nzonal, ntotal, limag, zsph_analytic)
+        write(33334,'("nzonal=",i0," ntotal=",i0," zreel=",f8.4," analytic=",f8.4)') nzonal,ntotal,zreel(5,1,1),zsph_analytic(5,1)
+        !write(33334,*)"nzonal=",nzonal," ntotal=",ntotal," zreel=",zreel(1,1,1)," anal=",zsph_analytic(1,1)
+        write(33335,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,1,:)-zsph_analytic(:,:))**2)/ngptot/sum((zsph_analytic(:,:))**2))
+        if(sign(1,zreel(1,1,1))/=sign(1,zsph_analytic(1,1))) write(33333,*)"nzonal=",nzonal," ntotal=",ntotal
+        call compute_analytic_eastwest_derivative(zgelam, zgelat, nzonal, ntotal, limag, zewde_analytic)
+        write(33336,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,2,:)-zewde_analytic(:,:))**2)/ngptot/sum((zewde_analytic(:,:))**2))
+        write(33337,'("nzonal=",i0," ntotal=",i0," ewde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,2,:)),maxval(zewde_analytic(:,:))
+        if(ntotal>nzonal) then
+          call compute_analytic_northsouth_derivative(zgelam, zgelat, nzonal, ntotal, limag, znsde_analytic)
+          write(33338,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,3,:)-znsde_analytic(:,:))**2)/ngptot/sum((znsde_analytic(:,:))**2))
+          write(33339,'("nzonal=",i0," ntotal=",i0," nsde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,3,:)),maxval(znsde_analytic(:,:))
+        end if
+      end do
+    end do
+!print*,"lat=",zgelat(1,1)," lon=",zgelam(1,1)
+!print*,"zreel=",zreel(1,1,1)," anal=",zsph_analytic(1,1)
+!print*,"zspsc2:",zspsc2(1,1:10)
+!print*,"zreel             zsph_analytic   relative error"
+!do i=1,20
+!  print*,zreel(i,1,1),real(zsph_analytic(i,1),kind=jprb), &
+!  &  abs(zreel(i,1,1)-real(zsph_analytic(i,1),kind=jprb))/real(zsph_analytic(i,1),kind=jprb)
+!end do
+!print*,"max:",maxval(zsph_analytic(:,1)/zreel(:,1,1))," min:",minval(zreel(:,1,1)/zsph_analytic(:,1))
     if( lgpnorms ) then
     ! reset prev value
     ivsetsc(1) = iprev
@@ -1143,7 +1174,7 @@ end subroutine
 
 subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, lscders, luvders, lgpnorms, &
   &                                   luseflt, nproma, verbosity, ldump_values, lprint_norms, &
-  &                                   lmeminfo, nprtrv, nprtrw, ncheck)
+  &                                   lmeminfo, nprtrv, nprtrw, ncheck, ntotal, nzonal, limag)
 
   integer, intent(inout) :: nsmax           ! Spectral truncation
   character(len=16), intent(inout) :: cgrid ! Spectral truncation
@@ -1165,6 +1196,9 @@ subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, 
   integer, intent(inout) :: nprtrw          ! Size of W set (spectral decomposition)
   integer, intent(inout) :: ncheck          ! The multiplier of the machine epsilon used as a
                                             ! tolerance for correctness checking
+  integer, intent(inout) :: ntotal          ! total wavenumber to be tested
+  integer, intent(inout) :: nzonal          ! zonal wavenumber to be tested
+  logical, intent(inout) :: limag           ! test imaginary part
 
   character(len=128) :: carg          ! Storage variable for command line arguments
   integer            :: iarg = 1      ! Argument index
@@ -1199,6 +1233,9 @@ subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, 
       case('-g', '--grid'); cgrid = get_str_value('-g', iarg)
       case('-f', '--nfld'); nfld = get_int_value('-f', iarg)
       case('-l', '--nlev'); nlev = get_int_value('-l', iarg)
+      case('--nzonal'); nzonal = get_int_value('--nzonal', iarg)
+      case('--ntotal'); ntotal = get_int_value('--ntotal', iarg)
+      case('--imaginary'); limag = .true.
       case('--vordiv'); lvordiv = .True.
       case('--scders'); lscders = .True.
       case('--uvders'); luvders = .True.
@@ -1343,11 +1380,14 @@ end subroutine print_help
 
 !===================================================================================================
 
-subroutine initialize_spectral_arrays(nsmax, zsp, sp3d)
+subroutine initialize_spectral_arrays(nsmax, zsp, sp3d, kzonal, ktotal, kimag)
 
   integer,         intent(in)    :: nsmax       ! Spectral truncation
   real(kind=jprb), intent(inout) :: zsp(:,:)    ! Surface pressure
   real(kind=jprb), intent(inout) :: sp3d(:,:,:) ! 3D fields
+  integer,         intent(in)    :: kzonal      ! Zonal wavenumber
+  integer,         intent(in)    :: ktotal      ! Total wavenumber
+  logical,         intent(in)    :: kimag       ! test imaginary part
 
   integer(kind=jpim) :: nflevl
   integer(kind=jpim) :: nfield
@@ -1358,12 +1398,12 @@ subroutine initialize_spectral_arrays(nsmax, zsp, sp3d)
   nfield = size(sp3d, 3)
 
   ! First initialize surface pressure
-  call initialize_2d_spectral_field(nsmax, zsp(1,:))
+  call initialize_2d_spectral_field(nsmax, zsp(1,:), kzonal, ktotal, kimag)
 
   ! Then initialize all of the 3D fields
   do i = 1, nflevl
     do j = 1, nfield
-      call initialize_2d_spectral_field(nsmax, sp3d(i,:,j))
+      call initialize_2d_spectral_field(nsmax, sp3d(i,:,j), kzonal, ktotal, kimag)
     end do
   end do
 
@@ -1371,17 +1411,16 @@ end subroutine initialize_spectral_arrays
 
 !===================================================================================================
 
-subroutine initialize_2d_spectral_field(nsmax, field)
+subroutine initialize_2d_spectral_field(nsmax, field, kzonal, ktotal, kimag)
 
   integer,         intent(in)    :: nsmax    ! Spectral truncation
   real(kind=jprb), intent(inout) :: field(:) ! Field to initialize
+  integer,         intent(in)    :: kzonal   ! Zonal wavenumber
+  integer,         intent(in)    :: ktotal   ! Total wavenumber
+  logical,         intent(in)    :: kimag    ! test imaginary part
 
   integer :: i, index, num_my_zon_wns
   integer, allocatable :: my_zon_wns(:), nasm0(:)
-
-  ! Choose a spherical harmonic to initialize arrays
-  integer :: m_num = 4  ! Zonal wavenumber
-  integer :: l_num = 19  ! Total wavenumber
 
   ! First initialise all spectral coefficients to zero
   field(:) = 0.0
@@ -1392,13 +1431,14 @@ subroutine initialize_2d_spectral_field(nsmax, field)
   call trans_inq(kmyms=my_zon_wns)
 
   ! If rank is responsible for the chosen zonal wavenumber...
-  if (any(my_zon_wns == m_num) ) then
+  if (any(my_zon_wns == kzonal) ) then
     ! Get array of spectral array addresses (this maps (m, n=m) to array index)
     allocate(nasm0(0:nsmax))
     call trans_inq(kasm0=nasm0)
 
     ! Find out local array index of chosen spherical harmonic
-    index = nasm0(m_num) + 2 * (l_num - m_num) + 1
+    index = nasm0(kzonal) + 2 * (ktotal - kzonal)
+    if(kimag) index = index + 1
 
     ! Set just that element to a constant value
     field(index) = 1.0
@@ -1458,13 +1498,14 @@ end subroutine calc_gelam_gelat
 
 !===================================================================================================
 
-subroutine compute_analytic_solution(gelam, gelat, n, m, sph_analytic)
+subroutine compute_analytic_solution(gelam, gelat, kzonal, ktotal, kimag, sph_analytic)
 
   implicit none
 
   real(kind=c_double), dimension(nproma,ngpblks), intent(in) :: gelam, gelat
   real(kind=c_double), dimension(nproma,ngpblks), intent(out) :: sph_analytic
-  integer(kind=jpim), intent(in) :: n, m
+  integer(kind=jpim), intent(in) :: kzonal, ktotal
+  logical, intent(in) :: kimag
   integer(kind=jpim) :: jkglo, iend, ioff, ibl, jrof
 
   do jkglo=1,ngptot,nproma
@@ -1472,13 +1513,60 @@ subroutine compute_analytic_solution(gelam, gelat, n, m, sph_analytic)
     ioff = jkglo - 1
     ibl  = (jkglo-1)/nproma+1
     do jrof=1,iend
-      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic( n, m, gelam(jrof,ibl), gelat(jrof,ibl))
+      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+      !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
     end do
   end do
 
-  print*,"analytic solution computed"
-
 end subroutine compute_analytic_solution
+
+!===================================================================================================
+
+subroutine compute_analytic_eastwest_derivative(gelam, gelat, kzonal, ktotal, kimag, sph_analytic)
+
+  implicit none
+
+  real(kind=c_double), dimension(nproma,ngpblks), intent(in) :: gelam, gelat
+  real(kind=c_double), dimension(nproma,ngpblks), intent(out) :: sph_analytic
+  integer(kind=jpim), intent(in) :: kzonal, ktotal
+  logical, intent(in) :: kimag
+  integer(kind=jpim) :: jkglo, iend, ioff, ibl, jrof
+
+  do jkglo=1,ngptot,nproma
+    iend = min(nproma,ngptot-jkglo+1)
+    ioff = jkglo - 1
+    ibl  = (jkglo-1)/nproma+1
+    do jrof=1,iend
+      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_eastwest_derivative( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+      !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+    end do
+  end do
+
+end subroutine compute_analytic_eastwest_derivative
+
+!===================================================================================================
+
+subroutine compute_analytic_northsouth_derivative(gelam, gelat, kzonal, ktotal, kimag, sph_analytic)
+
+  implicit none
+
+  real(kind=c_double), dimension(nproma,ngpblks), intent(in) :: gelam, gelat
+  real(kind=c_double), dimension(nproma,ngpblks), intent(out) :: sph_analytic
+  integer(kind=jpim), intent(in) :: kzonal, ktotal
+  logical, intent(in) :: kimag
+  integer(kind=jpim) :: jkglo, iend, ioff, ibl, jrof
+
+  do jkglo=1,ngptot,nproma
+    iend = min(nproma,ngptot-jkglo+1)
+    ioff = jkglo - 1
+    ibl  = (jkglo-1)/nproma+1
+    do jrof=1,iend
+      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_northsouth_derivative( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+      !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+    end do
+  end do
+
+end subroutine compute_analytic_northsouth_derivative
 
 !===================================================================================================
 

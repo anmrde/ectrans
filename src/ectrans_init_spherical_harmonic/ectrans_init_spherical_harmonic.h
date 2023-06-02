@@ -22,7 +22,10 @@ extern "C" {
 /// \param lon Longitude in degrees
 /// \param lat Latitude in degrees
 /// \return spherical harmonic
-double ectrans_init_spherical_harmonic(int n, int m, double lon, double lat);
+double ectrans_init_spherical_harmonic(int n, int m, double lon, double lat, bool imag);
+double ectrans_init_spherical_harmonic_hardcoded(int n, int m, double lon, double lat, bool imag);
+double ectrans_init_spherical_harmonic_eastwest_derivative(int n, int m, double lon, double lat, bool imag);
+double ectrans_init_spherical_harmonic_northsouth_derivative(int n, int m, double lon, double lat, bool imag);
 
 #ifdef __cplusplus
 }
