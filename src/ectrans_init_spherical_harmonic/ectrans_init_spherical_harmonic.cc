@@ -453,5 +453,31 @@ double ectrans_init_spherical_harmonic_hardcoded(int n, int m, double lon, doubl
 }
 }
 
+extern "C" {
+double ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded(int n, int m, double lon, double lat, bool imag) {
+
+    double latsin = std::sin(lat), latcos = std::cos(lat);
+    double lonsin = std::sin(m * lon), loncos = std::cos(m * lon);
+
+    double rcosinv = 1. / (earth_radius);
+    double rft = 1.;
+    if (m > 0) {
+        rft *= 2.;  // the famous factor 2 that noone really understands
+    }
+    if (imag == 0) {
+        rft *= lonsin; // DEBUGGING: should be loncos!!!
+    }
+    else {
+        rft *= -lonsin;
+    }
+
+    if (m == 0 && n == 1) {
+        return std::sqrt(3.) * latcos * rcosinv;
+    } else if (m == 1 && n == 1) {
+        return -std::sqrt(3. / 2.) * rft * rcosinv;
+    }
+}
+}
+
 }  // namespace init 
 }  // namespace ectrans

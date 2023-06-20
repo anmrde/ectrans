@@ -26,6 +26,7 @@ double ectrans_init_spherical_harmonic(int n, int m, double lon, double lat, boo
 double ectrans_init_spherical_harmonic_hardcoded(int n, int m, double lon, double lat, bool imag);
 double ectrans_init_spherical_harmonic_eastwest_derivative(int n, int m, double lon, double lat, bool imag);
 double ectrans_init_spherical_harmonic_northsouth_derivative(int n, int m, double lon, double lat, bool imag);
+double ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded(int n, int m, double lon, double lat, bool imag);
 
 #ifdef __cplusplus
 }

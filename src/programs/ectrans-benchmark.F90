@@ -46,7 +46,7 @@ use mpl_module
 use yomgstats, only: jpmaxstat
 use yomhook, only : dr_hook_init
 use iso_c_binding, only: c_double, c_int
-use ectrans_init_spherical_harmonic_mod, only : ectrans_init_spherical_harmonic, ectrans_init_spherical_harmonic_eastwest_derivative, ectrans_init_spherical_harmonic_northsouth_derivative, ectrans_init_spherical_harmonic_hardcoded
+use ectrans_init_spherical_harmonic_mod, only : ectrans_init_spherical_harmonic, ectrans_init_spherical_harmonic_eastwest_derivative, ectrans_init_spherical_harmonic_northsouth_derivative, ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded, ectrans_init_spherical_harmonic_hardcoded
 
 implicit none
 
@@ -154,6 +154,7 @@ logical :: lmpoff = .false. ! Message passing switch
 integer :: verbosity = 0
 
 real(kind=jprb) :: zra = 6371229._jprb
+real(kind=jprb) :: z_pi = 4.d0*datan(1.d0)
 
 integer(kind=jpim) :: nmax_resol = 37 ! Max number of resolutions
 integer(kind=jpim) :: npromatr = 0 ! nproma for trans lib
@@ -640,8 +641,8 @@ do jstep = 1, iters
       ilf = 1
     endif
     allocate(zreel(nproma,3,ngpblks))
-    do ntotal = 1,nsmax
-      do nzonal = 1,ntotal
+    do ntotal = 0,nsmax
+      do nzonal = 0,ntotal
         zreel(:,:,:)=0._jprb
         call initialize_spectral_arrays(nsmax, zspsc2, sp3d, nzonal, ntotal, limag)
         call inv_trans(kresol=1, kproma=nproma, &
@@ -655,12 +656,15 @@ do jstep = 1, iters
         write(33335,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,1,:)-zsph_analytic(:,:))**2)/ngptot/sum((zsph_analytic(:,:))**2))
         if(sign(1,zreel(1,1,1))/=sign(1,zsph_analytic(1,1))) write(33333,*)"nzonal=",nzonal," ntotal=",ntotal
         call compute_analytic_eastwest_derivative(zgelam, zgelat, nzonal, ntotal, limag, zewde_analytic)
-        write(33336,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,2,:)-zewde_analytic(:,:))**2)/ngptot/sum((zewde_analytic(:,:))**2))
+        if (sum((zewde_analytic(:,:))**2)>0) write(33336,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,2,:)-zewde_analytic(:,:))**2)/ngptot/sum((zewde_analytic(:,:))**2))
         write(33337,'("nzonal=",i0," ntotal=",i0," ewde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,2,:)),maxval(zewde_analytic(:,:))
-        if(ntotal>nzonal) then
+        if(nzonal == 1 .and. ntotal == 1) then
           call compute_analytic_northsouth_derivative(zgelam, zgelat, nzonal, ntotal, limag, znsde_analytic)
-          write(33338,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,3,:)-znsde_analytic(:,:))**2)/ngptot/sum((znsde_analytic(:,:))**2))
+          if (sum((znsde_analytic(:,:))**2)>0) write(33338,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,3,:)-znsde_analytic(:,:))**2)/ngptot/sum((znsde_analytic(:,:))**2))
           write(33339,'("nzonal=",i0," ntotal=",i0," nsde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,3,:)),maxval(znsde_analytic(:,:))
+          do i=1,2000
+            write(33340,'("lat=",f10.3," lon=",f10.3," sph=",e10.3," ana=",e10.3," nsDe=",e10.3," anaDe=",e10.3)') zgelat(i,1)*180/z_pi,zgelam(i,1)*180/z_pi,zreel(i,1,1),zsph_analytic(i,1),zreel(i,3,1),znsde_analytic(i,1)
+          end do
         end if
       end do
     end do
@@ -1561,7 +1565,7 @@ subroutine compute_analytic_northsouth_derivative(gelam, gelat, kzonal, ktotal, 
     ioff = jkglo - 1
     ibl  = (jkglo-1)/nproma+1
     do jrof=1,iend
-      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_northsouth_derivative( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
       !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
     end do
   end do

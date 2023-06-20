@@ -46,6 +46,17 @@ interface
     logical, intent(in), value :: imag
   end function
 
+  function ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded(n, m, lon, lat, imag) bind(c,name="ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded")
+    use iso_c_binding, only: c_double, c_int, c_bool
+    implicit none
+    real(c_double)                     :: ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded
+    integer(c_int), intent(in), value  :: n
+    integer(c_int), intent(in), value  :: m
+    real(c_double), intent(in), value  :: lon
+    real(c_double), intent(in), value  :: lat
+    logical, intent(in), value :: imag
+  end function
+
   function ectrans_init_spherical_harmonic_hardcoded(n, m, lon, lat, imag) bind(c,name="ectrans_init_spherical_harmonic_hardcoded")
     use iso_c_binding, only: c_double, c_int, c_bool
     implicit none
