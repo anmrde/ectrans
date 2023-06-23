@@ -515,8 +515,8 @@ else
   jend_vder_EW   = jend_uv
 endif
 
-jbegin_sc = jbegin_vder_EW + 1
-jend_sc   = jbegin_vder_EW + nfld
+jbegin_sc = jend_vder_EW + 1
+jend_sc   = jend_vder_EW + nfld
 
 if (lscders) then
   ndimgmvs = 3
@@ -653,21 +653,23 @@ do jstep = 1, iters
         call compute_analytic_solution(zgelam, zgelat, nzonal, ntotal, limag, zsph_analytic)
         write(33334,'("nzonal=",i0," ntotal=",i0," zreel=",f8.4," analytic=",f8.4)') nzonal,ntotal,zreel(5,1,1),zsph_analytic(5,1)
         !write(33334,*)"nzonal=",nzonal," ntotal=",ntotal," zreel=",zreel(1,1,1)," anal=",zsph_analytic(1,1)
-        write(33335,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,1,:)-zsph_analytic(:,:))**2)/ngptot/sum((zsph_analytic(:,:))**2))
+        if (sum((zsph_analytic(:,:))**2)>0) write(33335,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,1,:)-zsph_analytic(:,:))**2)/ngptot/sum((zsph_analytic(:,:))**2))
         if(sign(1,zreel(1,1,1))/=sign(1,zsph_analytic(1,1))) write(33333,*)"nzonal=",nzonal," ntotal=",ntotal
         call compute_analytic_eastwest_derivative(zgelam, zgelat, nzonal, ntotal, limag, zewde_analytic)
-        if (sum((zewde_analytic(:,:))**2)>0) write(33336,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,2,:)-zewde_analytic(:,:))**2)/ngptot/sum((zewde_analytic(:,:))**2))
-        write(33337,'("nzonal=",i0," ntotal=",i0," ewde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,2,:)),maxval(zewde_analytic(:,:))
-        if(nzonal == 1 .and. ntotal == 1) then
-          call compute_analytic_northsouth_derivative(zgelam, zgelat, nzonal, ntotal, limag, znsde_analytic)
-          if (sum((znsde_analytic(:,:))**2)>0) write(33338,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,3,:)-znsde_analytic(:,:))**2)/ngptot/sum((znsde_analytic(:,:))**2))
-          write(33339,'("nzonal=",i0," ntotal=",i0," nsde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,3,:)),maxval(znsde_analytic(:,:))
+        if (sum((zewde_analytic(:,:))**2)>0) write(33336,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,3,:)-zewde_analytic(:,:))**2)/ngptot/sum((zewde_analytic(:,:))**2))
+        call compute_analytic_northsouth_derivative(zgelam, zgelat, nzonal, ntotal, limag, znsde_analytic)
+        if (sum((znsde_analytic(:,:))**2)>0) write(33339,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,2,:)-znsde_analytic(:,:))**2)/ngptot/sum((znsde_analytic(:,:))**2))
+        write(33341,'("nzonal=",i0," ntotal=",i0," nsde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,2,:)),maxval(znsde_analytic(:,:))
+        write(33337,'("nzonal=",i0," ntotal=",i0," ewde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,3,:)),maxval(zewde_analytic(:,:))
+        if(nzonal == 0 .and. ntotal == 1) then
           do i=1,2000
-            write(33340,'("lat=",f10.3," lon=",f10.3," sph=",e10.3," ana=",e10.3," nsDe=",e10.3," anaDe=",e10.3)') zgelat(i,1)*180/z_pi,zgelam(i,1)*180/z_pi,zreel(i,1,1),zsph_analytic(i,1),zreel(i,3,1),znsde_analytic(i,1)
+            write(33338,'("lat=",f10.3," lon=",f10.3," sph=",e10.3," ana=",e10.3," nsDe=",e10.3," anaDe=",e10.3)') zgelat(i,1)*180/z_pi,zgelam(i,1)*180/z_pi,zreel(i,1,1),zsph_analytic(i,1),zreel(i,3,1),zewde_analytic(i,1)
+            write(33340,'("lat=",f10.3," lon=",f10.3," sph=",e10.3," ana=",e10.3," nsDe=",e10.3," anaDe=",e10.3)') zgelat(i,1)*180/z_pi,zgelam(i,1)*180/z_pi,zreel(i,1,1),zsph_analytic(i,1),zreel(i,2,1),znsde_analytic(i,1)
           end do
         end if
       end do
     end do
+    stop "just debugging"
 !print*,"lat=",zgelat(1,1)," lon=",zgelam(1,1)
 !print*,"zreel=",zreel(1,1,1)," anal=",zsph_analytic(1,1)
 !print*,"zspsc2:",zspsc2(1,1:10)
@@ -1565,7 +1567,8 @@ subroutine compute_analytic_northsouth_derivative(gelam, gelat, kzonal, ktotal, 
     ioff = jkglo - 1
     ibl  = (jkglo-1)/nproma+1
     do jrof=1,iend
-      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+      !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_northsouth_derivative( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
       !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
     end do
   end do

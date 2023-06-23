@@ -10,6 +10,7 @@
 
 #include <cmath>
 #include <stdexcept>
+#include<iostream>
 
 #include "ectrans_init_spherical_harmonic.h"
 
@@ -54,6 +55,7 @@ static double P(const int n, const int m, const double x) {
     }
 
     // Formula 1
+    //std::cout << "P: n: " << n << std::endl;
     return (x * (2 * n - 1) * P(n - 1, m, x) - (n + m - 1) * P(n - 2, m, x)) / (n - m);
 }
 
@@ -74,7 +76,11 @@ double ectrans_init_spherical_harmonic(int n, int m, double lon, double lat, boo
     double colat = M_PI_2 - lat;
 
     if (m == 0) {
-        return (K(n, 0) * P(n, 0, std::sin(lat)));
+        if (imag) {
+            return 0.0;
+        } else {
+            return (2 * K(n, m) * std::cos(m * lon) * P(n, m, std::sin(lat)));
+        }
     }
 
     if (m > 0) {
@@ -97,9 +103,9 @@ double ectrans_init_spherical_harmonic(int n, int m, double lon, double lat, boo
 extern "C" {
 double ectrans_init_spherical_harmonic_eastwest_derivative(int n, int m, double lon, double lat, bool imag) {
     if (imag) {
-        return (m * ectrans_init_spherical_harmonic(n, m, lon, lat, !imag) / (earth_radius * cos(lat)));
-    } else {
         return (- m * ectrans_init_spherical_harmonic(n, m, lon, lat, !imag) / (earth_radius * cos(lat)));
+    } else {
+        return (m * ectrans_init_spherical_harmonic(n, m, lon, lat, !imag) / (earth_radius * cos(lat)));
     }
 }
 }
@@ -117,24 +123,44 @@ double ectrans_init_spherical_harmonic_northsouth_derivative(int n, int m, doubl
 
     double colat = M_PI_2 - lat;
 
-    if (m == 0) {
-        return (K(n, 0) * (n * sinlat * P(n, 0, sinlat) - (n + m) * P(n - 1, 0, sinlat)) / (earth_radius * coslat * coslat));
-    }
+    double coeff_a = (n+1)*std::sqrt((n*n-m*m)/(4.0*n*n-1));
+    //if(m==1 && n==1) std::cout << "coeff_a: " << coeff_a << std::endl;
+    double coeff_b = -n*std::sqrt(((n+1)*(n+1)-m*m)/(4.0*(n+1)*(n+1)-1));
+    //if(m==1 && n==1) std::cout << "coeff_b: " << coeff_b << std::endl;
+    std::cout << "m=" << m << " n=" << n << std::endl;
 
-    if (m > 0) {
-        if (imag) {
-            return (-2 * K(n, m) * std::sin(m * lon) * (n * sinlat * P(n, m, sinlat) - (n + m) * P(n - 1, m, sinlat)) / (earth_radius * coslat * coslat));
+    if (m == 0) {
+        if (n > m) {
+            if (imag) {
+                return 0.0;
+            } else {
+                return (K(n-1, m) * coeff_a * P(n-1, m, std::sin(lat)) + K(n+1, m) * coeff_b * P(n+1, m, std::sin(lat))) / (earth_radius * coslat);
+            }
         } else {
-            return (2 * K(n, m) * std::cos(m * lon) * (n * sinlat * P(n, m, sinlat) - (n + m) * P(n - 1, m, sinlat)) / (earth_radius * coslat * coslat));
+            if (imag) {
+                return 0.0;
+            } else {
+                return (K(n+1, m) * coeff_b * P(n+1, m, std::sin(lat))) / (earth_radius * coslat);
+            }
         }
     }
 
-    // When m is less than 0, multiply - 1 in advance and send it to K
-    if (imag) {
-        return (-2 * K(n, abs_m) * std::cos(abs_m * lon) * (n * sinlat * P(n, abs_m, sinlat) - (n + abs_m) * P(n - 1, abs_m, sinlat)) / (earth_radius * coslat * coslat));
-    } else {
-        return (2 * K(n, abs_m) * std::sin(abs_m * lon) * (n * sinlat * P(n, abs_m, sinlat) - (n + abs_m) * P(n - 1, abs_m, sinlat)) / (earth_radius * coslat * coslat));
+    if (m > 0) {
+        if (n > m) {
+            if (imag) {
+                return -2 * std::sin(m * lon) * (K(n-1, m) * coeff_a * P(n-1, m, std::sin(lat)) + K(n+1, m) * coeff_b * P(n+1, m, std::sin(lat))) / (earth_radius * coslat);
+            } else {
+                return 2 * std::cos(m * lon) * (K(n-1, m) * coeff_a * P(n-1, m, std::sin(lat)) + K(n+1, m) * coeff_b * P(n+1, m, std::sin(lat))) / (earth_radius * coslat);
+            }
+        } else {
+            if (imag) {
+                return -2 * std::sin(m * lon) * (K(n+1, m) * coeff_b * P(n+1, m, std::sin(lat))) / (earth_radius * coslat);
+            } else {
+                return 2 * std::cos(m * lon) * (K(n+1, m) * coeff_b * P(n+1, m, std::sin(lat))) / (earth_radius * coslat);
+            }
+        }
     }
+
 }
 }
 
