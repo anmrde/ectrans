@@ -661,12 +661,14 @@ do jstep = 1, iters
         if (sum((znsde_analytic(:,:))**2)>0) write(33339,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,2,:)-znsde_analytic(:,:))**2)/ngptot/sum((znsde_analytic(:,:))**2))
         write(33341,'("nzonal=",i0," ntotal=",i0," nsde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,2,:)),maxval(znsde_analytic(:,:))
         write(33337,'("nzonal=",i0," ntotal=",i0," ewde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,3,:)),maxval(zewde_analytic(:,:))
-        if(nzonal == 0 .and. ntotal == 1) then
+        if(nzonal == 1 .and. ntotal == 1) then
           do i=1,2000
             write(33338,'("lat=",f10.3," lon=",f10.3," sph=",e10.3," ana=",e10.3," nsDe=",e10.3," anaDe=",e10.3)') zgelat(i,1)*180/z_pi,zgelam(i,1)*180/z_pi,zreel(i,1,1),zsph_analytic(i,1),zreel(i,3,1),zewde_analytic(i,1)
             write(33340,'("lat=",f10.3," lon=",f10.3," sph=",e10.3," ana=",e10.3," nsDe=",e10.3," anaDe=",e10.3)') zgelat(i,1)*180/z_pi,zgelam(i,1)*180/z_pi,zreel(i,1,1),zsph_analytic(i,1),zreel(i,2,1),znsde_analytic(i,1)
           end do
+          print*,"33338 and 33340 written"
         end if
+        print*,"m=",nzonal," n=",ntotal
       end do
     end do
     stop "just debugging"
@@ -1519,12 +1521,168 @@ subroutine compute_analytic_solution(gelam, gelat, kzonal, ktotal, kimag, sph_an
     ioff = jkglo - 1
     ibl  = (jkglo-1)/nproma+1
     do jrof=1,iend
-      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+      !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+      !print *,"C: result=",sph_analytic(jrof,ibl)
+      sph_analytic(jrof,ibl) = analytic_spherical_harmonic_point( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+      !print *,"Fortran: result=",sph_analytic(jrof,ibl)
+      !stop "debugging"
       !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
     end do
   end do
 
 end subroutine compute_analytic_solution
+
+!===================================================================================================
+
+function analytic_spherical_harmonic_point(n, m, lon, lat, imag) result(pointValue)
+  implicit none
+  integer(jpim), intent(in), value :: n
+  integer(jpim), intent(in), value :: m
+  real(jprd), intent(in), value    :: lon
+  real(jprd), intent(in), value    :: lat
+  logical, intent(in), value       :: imag
+  real(jprd) :: pointValue
+  real(jprd) :: sinlat, coslat, colat
+  integer(jpim) :: abs_m
+  sinlat = sin(lat)
+  coslat = cos(lat)
+  abs_m = abs(m)
+  if(n<abs_m) call abor1("Error in analytic_spherical_harmonic_point: assertion (n >= abs_m) failed")
+  colat = z_pi/2.0 - lat
+  if (m == 0) then
+    if (imag) then
+      pointValue = 0.0
+    else
+      pointValue = (K(n, m) * P(n, m, sinlat))
+    end if
+  end if
+
+  if (m > 0) then
+    if (imag) then
+        pointValue = (-2 * K(n, m) * sin(m * lon) * P(n, m, sinlat))
+    else
+        pointValue = (2 * K(n, m) * cos(m * lon) * P(n, m, sinlat))
+    end if
+  end if
+!print*,"Fortran: K=",K(n,m)," P=",P(n, m, sinlat)," result=",pointValue
+end function analytic_spherical_harmonic_point
+
+function factorial(n) result(fact)
+  implicit none
+  integer(jpim) :: n, i
+  real(jprd) :: fact
+  if (n < 0) call abor1("factorial of negative number not defined!")
+  !fact = int(gamma(n+1), kind=jpim)
+  fact = 1.0
+  do i = 2,n
+    fact = fact * i
+  end do
+end function factorial
+
+function double_factorial(x) result(fact)
+  implicit none
+  integer(jpim) :: x, y
+  real(jprd) :: fact
+  y = x
+  if (y == 0 .or. y == -1) then
+    fact = 1
+  else
+    fact = y
+    do while (y > 2)
+      y = y - 2
+      fact = fact * y
+    end do
+  end if
+end function double_factorial
+
+recursive function P(n, m, x) result(legPoly)
+  implicit none
+  integer(jpim) :: n, m
+  real(jprd) :: x, legPoly
+  ! No recursive calculation needed
+  if (n == m) then
+      legPoly = (double_factorial(2 * m - 1) * sqrt(1. - x * x) ** m)
+  end if
+
+  if (n == m + 1) then
+    legPoly = x * (2 * m + 1) * P(m, m, x)
+  end if
+
+  ! Formula 1
+  if (n > m + 1) then
+    legPoly =  (x * (2 * n - 1) * P(n - 1, m, x) - (n + m - 1) * P(n - 2, m, x)) / (n - m)
+  end if
+end function P
+
+function K(n, m) result(kFactor)
+  implicit none
+  integer(jpim) :: n, m
+  real(jprd) :: kFactor
+  kFactor = sqrt(((2 * n + 1) * factorial(n - m)) / (factorial(n + m)))
+end function K
+
+function analytic_eastwest_derivative_point(n, m, lon, lat, imag) result(pointValue)
+  implicit none
+  integer(jpim), intent(in), value :: n
+  integer(jpim), intent(in), value :: m
+  real(jprd), intent(in), value    :: lon
+  real(jprd), intent(in), value    :: lat
+  logical, intent(in), value       :: imag
+  real(jprd) :: pointValue
+  if (imag) then
+    pointValue = (- m * analytic_spherical_harmonic_point(n, m, lon, lat, .false.) / (zra * cos(lat)));
+  else
+    pointValue = (m * analytic_spherical_harmonic_point(n, m, lon, lat, .true.) / (zra * cos(lat)));
+  end if
+
+end function analytic_eastwest_derivative_point
+
+function analytic_northsouth_derivative_point(n, m, lon, lat, imag) result(pointValue)
+  implicit none
+  integer(jpim), intent(in), value :: n
+  integer(jpim), intent(in), value :: m
+  real(jprd), intent(in), value    :: lon
+  real(jprd), intent(in), value    :: lat
+  logical, intent(in), value       :: imag
+  real(jprd) :: pointValue
+  real(jprd) :: sinlat, coslat, colat, coeff_a, coeff_b
+  integer(jpim) :: abs_m
+  sinlat = sin(lat)
+  coslat = cos(lat)
+  abs_m = abs(m)
+  if(n<abs_m) call abor1("Error in analytic_spherical_harmonic_point_northsouth_derivative: assertion (n >= abs_m) failed")
+  colat = z_pi/2.0 - lat
+  coeff_a = (n+1)*sqrt((n*n-m*m)/(4.0*n*n-1))
+  coeff_b = -n*sqrt(((n+1)*(n+1)-m*m)/(4.0*(n+1)*(n+1)-1))
+  if (m == 0) then
+    if (imag) then
+      pointValue = 0.0
+    else
+      if (n > m) then
+        pointValue = (K(n-1, m) * coeff_a * P(n-1, m, sinlat) + K(n+1, m) * coeff_b * P(n+1, m, sinlat)) / (zra * coslat)
+      else
+        pointValue = (K(n+1, m) * coeff_b * P(n+1, m, sinlat)) / (zra * coslat)
+      end if
+    end if
+  end if
+
+  if (m > 0) then
+    if (n > m) then
+      if (imag) then
+          pointValue = -2 * sin(m * lon) * (K(n-1, m) * coeff_a * P(n-1, m, sinlat) + K(n+1, m) * coeff_b * P(n+1, m, sinlat)) / (zra * coslat);
+      else
+          pointValue = 2 * cos(m * lon) * (K(n-1, m) * coeff_a * P(n-1, m, sinlat) + K(n+1, m) * coeff_b * P(n+1, m, sinlat)) / (zra * coslat);
+      end if
+    else
+      if (imag) then
+          pointValue = -2 * sin(m * lon) * (K(n+1, m) * coeff_b * P(n+1, m, sinlat)) / (zra * coslat);
+      else
+          pointValue = 2 * cos(m * lon) * (K(n+1, m) * coeff_b * P(n+1, m, sinlat)) / (zra * coslat);
+      end if
+    end if
+  end if
+
+end function analytic_northsouth_derivative_point
 
 !===================================================================================================
 
@@ -1543,7 +1701,8 @@ subroutine compute_analytic_eastwest_derivative(gelam, gelat, kzonal, ktotal, ki
     ioff = jkglo - 1
     ibl  = (jkglo-1)/nproma+1
     do jrof=1,iend
-      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_eastwest_derivative( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+!      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_eastwest_derivative( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+      sph_analytic(jrof,ibl) = analytic_eastwest_derivative_point( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
       !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
     end do
   end do
@@ -1568,7 +1727,8 @@ subroutine compute_analytic_northsouth_derivative(gelam, gelat, kzonal, ktotal, 
     ibl  = (jkglo-1)/nproma+1
     do jrof=1,iend
       !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
-      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_northsouth_derivative( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+      !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_northsouth_derivative( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
+      sph_analytic(jrof,ibl) = analytic_northsouth_derivative_point( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
       !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
     end do
   end do
