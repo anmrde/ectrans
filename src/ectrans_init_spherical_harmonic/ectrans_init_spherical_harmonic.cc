@@ -79,7 +79,7 @@ double ectrans_init_spherical_harmonic(int n, int m, double lon, double lat, boo
         if (imag) {
             return 0.0;
         } else {
-            return (2 * K(n, m) * std::cos(m * lon) * P(n, m, std::sin(lat)));
+            return (K(n, m) * P(n, m, std::sin(lat)));
         }
     }
 

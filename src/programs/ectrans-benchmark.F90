@@ -86,7 +86,7 @@ integer(kind=jpim) :: n_regions_ns
 integer(kind=jpim) :: n_regions_ew
 
 integer(kind=jpim), allocatable :: nloen(:), nprcids(:), nlatidxs(:,:)
-integer(kind=jpim) :: myproc, jj, jf, ilf
+integer(kind=jpim) :: myproc, jj, jf, ilf, igp
 integer :: jstep
 
 real(kind=jprd) :: ztinit, ztloop, timef, ztstepmax, ztstepmin, ztstepavg, ztstepmed
@@ -545,8 +545,19 @@ allocate(zgelam(nproma,ngpblks),zgelat(nproma,ngpblks),zsph_analytic(nproma,ngpb
   & zewde_analytic(nproma,ngpblks),znsde_analytic(nproma,ngpblks),nlatidxs(nproma,ngpblks),zsinlats(ndgl))
 call calc_gelam_gelat(zgelam, zgelat, nlatidxs, zsinlats, nlats)
 allocate(zlegpolys(nlats,0:nsmax,0:nsmax))
-call buffer_legendre_polynomials(nsmax, nlats, zsinlats, zlegpolys)
-!call compute_analytic_solution(zgelam, zgelat, nzonal, ntotal, limag, zlegpolys, nlatidxs, zsph_analytic)
+!zlegpolys = 0.0
+!call buffer_legendre_polynomials(nsmax, nlats, zsinlats, zlegpolys)
+!print*,"instable version: legpolys=",zlegpolys(1,0,:)
+!zlegpolys = 0.0
+!call buffer_legendre_polynomials_belusov(nsmax, nlats, zsinlats, zlegpolys)
+!  print*,"belusov: legpolys=",zlegpolys(1,0,:)
+zlegpolys = 0.0
+call buffer_legendre_polynomials_supolf(nsmax, nlats, zsinlats, zlegpolys)
+!print*,"supolf: legpolys=",zlegpolys(1,0,:)
+!zlegpolys = 0.0
+!call buffer_legendre_polynomials_ectrans(nsmax, nlats, zsinlats, zlegpolys)
+!print*,"ectrans: legpolys=",zlegpolys(1,0,:)
+call compute_analytic_solution(zgelam, zgelat, nzonal, ntotal, limag, zlegpolys, nlatidxs, zsph_analytic)
 
 !===================================================================================================
 ! Allocate norm arrays
@@ -644,6 +655,12 @@ do jstep = 1, iters
       ilf = 1
     endif
     allocate(zreel(nproma,3,ngpblks))
+    write(33334,'("values at grid point 5")')
+    write(33334,'("   m   n ┃  zreel analytic │ north-south  analytic │  east-west   analytic ")')
+    write(33334,'("━━━━━━━━━╋━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━")')
+    write(33341,'("maximum value")')
+    write(33341,'("   m   n ┃  zreel analytic │ north-south  analytic │  east-west   analytic ")')
+    write(33341,'("━━━━━━━━━╋━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━")')
     do ntotal = 0,nsmax
       do nzonal = 0,ntotal
         zreel(:,:,:)=0._jprb
@@ -654,23 +671,25 @@ do jstep = 1, iters
           & kvsetsc=ivsetsc,                   &
           & pgp=zreel)
         call compute_analytic_solution(zgelam, zgelat, nzonal, ntotal, limag, zlegpolys, nlatidxs, zsph_analytic)
-        write(33334,'("nzonal=",i0," ntotal=",i0," zreel=",f8.4," analytic=",f8.4)') nzonal,ntotal,zreel(5,1,1),zsph_analytic(5,1)
-        !write(33334,*)"nzonal=",nzonal," ntotal=",ntotal," zreel=",zreel(1,1,1)," anal=",zsph_analytic(1,1)
-        if (sum((zsph_analytic(:,:))**2)>0) write(33335,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,1,:)-zsph_analytic(:,:))**2)/ngptot/sum((zsph_analytic(:,:))**2))
-        if(sign(1,zreel(1,1,1))/=sign(1,zsph_analytic(1,1))) write(33333,*)"nzonal=",nzonal," ntotal=",ntotal
+        !!write(33334,*)"nzonal=",nzonal," ntotal=",ntotal," zreel=",zreel(1,1,1)," anal=",zsph_analytic(1,1)
+        !if (sum((zsph_analytic(:,:))**2)>0) write(33335,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,1,:)-zsph_analytic(:,:))**2)/ngptot/sum((zsph_analytic(:,:))**2))
+        !if(sign(1,zreel(1,1,1))/=sign(1,zsph_analytic(1,1))) write(33333,*)"nzonal=",nzonal," ntotal=",ntotal
         call compute_analytic_eastwest_derivative(zgelam, zgelat, nzonal, ntotal, limag, zlegpolys, nlatidxs, zewde_analytic)
-        if (sum((zewde_analytic(:,:))**2)>0) write(33336,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,3,:)-zewde_analytic(:,:))**2)/ngptot/sum((zewde_analytic(:,:))**2))
+        !if (sum((zewde_analytic(:,:))**2)>0) write(33336,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,3,:)-zewde_analytic(:,:))**2)/ngptot/sum((zewde_analytic(:,:))**2))
         call compute_analytic_northsouth_derivative(zgelam, zgelat, nzonal, ntotal, limag, zlegpolys, nlatidxs, znsde_analytic)
-        if (sum((znsde_analytic(:,:))**2)>0) write(33339,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,2,:)-znsde_analytic(:,:))**2)/ngptot/sum((znsde_analytic(:,:))**2))
-        write(33341,'("nzonal=",i0," ntotal=",i0," nsde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,2,:)),maxval(znsde_analytic(:,:))
-        write(33337,'("nzonal=",i0," ntotal=",i0," ewde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,3,:)),maxval(zewde_analytic(:,:))
-        if(nzonal == 1 .and. ntotal == 1) then
-          do i=1,2000
-            write(33338,'("lat=",f10.3," lon=",f10.3," sph=",e10.3," ana=",e10.3," nsDe=",e10.3," anaDe=",e10.3)') zgelat(i,1)*180/z_pi,zgelam(i,1)*180/z_pi,zreel(i,1,1),zsph_analytic(i,1),zreel(i,3,1),zewde_analytic(i,1)
-            write(33340,'("lat=",f10.3," lon=",f10.3," sph=",e10.3," ana=",e10.3," nsDe=",e10.3," anaDe=",e10.3)') zgelat(i,1)*180/z_pi,zgelam(i,1)*180/z_pi,zreel(i,1,1),zsph_analytic(i,1),zreel(i,2,1),znsde_analytic(i,1)
-          end do
-          print*,"33338 and 33340 written"
-        end if
+        !if (sum((znsde_analytic(:,:))**2)>0) write(33339,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,2,:)-znsde_analytic(:,:))**2)/ngptot/sum((znsde_analytic(:,:))**2))
+        !write(33341,'("nzonal=",i0," ntotal=",i0," nsde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,2,:)),maxval(znsde_analytic(:,:))
+        !write(33337,'("nzonal=",i0," ntotal=",i0," ewde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,3,:)),maxval(zewde_analytic(:,:))
+        write(33341,'(i4,i4," ┃",f8.4,f8.4," │",e11.3,e11.3," │",e11.3,e11.3)') nzonal,ntotal,maxval(zreel(:,1,:)),maxval(zsph_analytic(:,:)),maxval(zreel(:,2,:)),maxval(znsde_analytic(:,:)),maxval(zreel(:,3,:)),maxval(zewde_analytic(:,:))
+        igp = ngptot/3
+        write(33334,'(i4,i4," ┃",f8.4,f8.4," │",e11.3,e11.3," │",e11.3,e11.3)') nzonal,ntotal,zreel(igp,1,1),zsph_analytic(igp,1),zreel(igp,2,1),znsde_analytic(igp,1),zreel(igp,3,1),zewde_analytic(igp,1)
+        !if(nzonal == 1 .and. ntotal == 1) then
+        !  do i=1,2000
+        !    write(33338,'("lat=",f10.3," lon=",f10.3," sph=",e10.3," ana=",e10.3," nsDe=",e10.3," anaDe=",e10.3)') zgelat(i,1)*180/z_pi,zgelam(i,1)*180/z_pi,zreel(i,1,1),zsph_analytic(i,1),zreel(i,3,1),zewde_analytic(i,1)
+        !    write(33340,'("lat=",f10.3," lon=",f10.3," sph=",e10.3," ana=",e10.3," nsDe=",e10.3," anaDe=",e10.3)') zgelat(i,1)*180/z_pi,zgelam(i,1)*180/z_pi,zreel(i,1,1),zsph_analytic(i,1),zreel(i,2,1),znsde_analytic(i,1)
+        !  end do
+        !  print*,"33338 and 33340 written"
+        !end if
         print*,"m=",nzonal," n=",ntotal
       end do
     end do
@@ -1486,6 +1505,9 @@ subroutine calc_gelam_gelat(gelam, gelat, nlatidxs, sinlats, nlats)
      & konl=nonl,                     &
      & pmu=zmu)
 
+     !DEBUGGING:
+     !print*,"calc_gelam: nfrstlat=",nfrstlat(my_region_ns)," nlstlat=",nlstlat(my_region_ns)," istlon=",istlon," iendlon=",iendlon," num=",(nlstlat(my_region_ns)-nfrstlat(my_region_ns)+1)*(iendlon-istlon)," ngptot=",ngptot
+write(33350,'("calc_gelam: num=",i10," ngptot=",i10)'),sum(nonl(nptrfloff+1:nptrfloff+nlstlat(my_region_ns)-nfrstlat(my_region_ns)+1,my_region_ew)-nsta(nptrfloff+1:nptrfloff+nlstlat(my_region_ns)-nfrstlat(my_region_ns)+1,my_region_ew)+1),ngptot
   ilat = nptrfloff
   ilat0 = 0
   ibl  = 1
@@ -1510,6 +1532,7 @@ subroutine calc_gelam_gelat(gelam, gelat, nlatidxs, sinlats, nlats)
     end do
   end do
   nlats = ilat0
+  print*,"calc_gelam: jrof=",jrof
 
   print*,"calc_gelam_gelat finished"
 
@@ -1527,35 +1550,134 @@ subroutine buffer_legendre_polynomials(nsmax, nlats, sinlats, legpolys)
   real(kind=jprd) :: x
   integer(kind=jpim) :: n, m
 
-  legpolys = 0.0
-print*,"start computing legpolys"
   do n = 0,nsmax
     do ilat = 1,nlats
       x = sinlats(ilat)
       legpolys(ilat, n, n) = (double_factorial(2 * n - 1) * sqrt(1. - x * x) ** n)
     end do
   end do
-print*,"n=m done"
+
   do n = 1,nsmax
     do ilat = 1,nlats
       x = sinlats(ilat)
-      legpolys(ilat, n, n-1) = x * (2 * n - 1) * legpolys(ilat, n-1, n-1)
+      legpolys(ilat, n-1, n) = x * (2 * n - 1) * legpolys(ilat, n-1, n-1)
     end do
   end do
-print*,"n=m+1 done"
+
   do n = 2,nsmax
     do m = 0,n-2
       do ilat = 1,nlats
         x = sinlats(ilat)
-        legpolys(ilat, n, m) = (x * (2 * n - 1) * legpolys(ilat, n-1, m) - (n + m - 1) * legpolys(ilat, n-2, m)) / (n - m)
+        legpolys(ilat, m, n) = (x * (2 * n - 1) * legpolys(ilat, m, n-1) - (n + m - 1) * legpolys(ilat, m, n-2)) / (n - m)
       end do
     end do
-    print*,"computing n=",n
   end do
 
-  !print*, "Legendre-polynomials: buffer:",legpolys(1, nsmax, 0), " P=",P(nsmax,0,sinlats(1))
+  do n = 0,nsmax
+    do m = 0,n
+      do ilat = 1,nlats
+        legpolys(ilat, m, n) = K(n, m) * legpolys(ilat, m, n)
+      end do
+    end do
+  end do
 
 end subroutine buffer_legendre_polynomials
+
+!===================================================================================================
+
+subroutine buffer_legendre_polynomials_belusov(nsmax, nlats, sinlats, legpolys)
+
+  use supol_test_mod, only: supol_test
+  use tpm_pol_test, only: ini_pol_test
+
+  implicit none
+
+  integer(kind=jpim), intent(in) :: nsmax, nlats
+  real(kind=jprd), dimension(nlats), intent(in) :: sinlats
+  real(kind=jprd), dimension(nlats, 0:nsmax, 0:nsmax), intent(out) :: legpolys
+  real(kind=jprd), dimension(0:nsmax, 0:nsmax) :: zfn
+  real(kind=jprd) :: zfnn
+  integer(kind=jpim) :: jn, jgl, iodd
+
+  zfn(0,0) = 2._jprd
+  do jn = 1,nsmax
+    zfnn = zfn(0,0)
+    do jgl = 1,jn
+      zfnn = zfnn * sqrt(1._jprd - 0.25_jprd / real(jgl**2,jprd))
+    end do
+
+    iodd = mod(jn,2)
+    zfn(jn,jn) = zfnn
+    do jgl = 2,jn-iodd,2
+      zfn(jn,jn-jgl) = zfn(jn,jn-jgl+2) * real((jgl-1)*(2*jn-jgl+2),jprd) / real(jgl*(2*jn-jgl+1),jprd)
+    end do
+  end do
+
+  call ini_pol_test(nsmax)
+  do jgl=1,nlats
+    call supol_test(nsmax, sinlats(jgl), zfn, legpolys(jgl,:,:))
+  end do
+
+  !jgl = 1
+  !print*,"buffer-belusov: sinlat=",sinlats(jgl)," ZFN=",zfn(:,0)," ZLFPOL=",legpolys(jgl,0,:)
+
+end subroutine buffer_legendre_polynomials_belusov
+
+!===================================================================================================
+
+subroutine buffer_legendre_polynomials_supolf(nsmax, nlats, sinlats, legpolys)
+
+  use supolf_test_mod, only: supolf_test
+  use tpm_pol_test, only: ini_pol_test, dfa
+
+  implicit none
+
+  integer(kind=jpim), intent(in) :: nsmax, nlats
+  real(kind=jprd), dimension(nlats), intent(in) :: sinlats
+  real(kind=jprd), dimension(nlats, 0:nsmax, 0:nsmax), intent(out) :: legpolys
+  integer(kind=jpim) :: km, jgl
+
+  call ini_pol_test(nsmax)
+  do jgl=1,nlats
+    do km=0,nsmax
+      call supolf_test(km, nsmax, sinlats(jgl), legpolys(jgl,km,:))
+    end do
+  end do
+
+  !jgl = 1
+  !print*,"buffer-supolf: sinlat=",sinlats(jgl)," ZLFPOL=",legpolys(jgl,0,:)
+
+end subroutine buffer_legendre_polynomials_supolf
+
+subroutine buffer_legendre_polynomials_ectrans(nsmax, nlats, sinlats, legpolys)
+
+  use supolf_test_mod, only: supolf_test
+  use tpm_pol_test, only: ini_pol_test, dfa
+
+  implicit none
+
+  integer(kind=jpim), intent(in) :: nsmax, nlats
+  real(kind=jprd), dimension(nlats), intent(in) :: sinlats
+  real(kind=jprd), dimension(nlats, 0:nsmax, 0:nsmax), intent(out) :: legpolys
+  real(kind=jprb), dimension(ndgl,nsmax*nsmax/2) :: rpnm
+  integer(kind=jpim) :: jnm, jn, jm
+
+  call trans_inq(prpnm=rpnm)
+
+  do ilat=1,nlats
+    jnm = 0
+    do jn=0,nsmax
+      do jm=0,jn
+        jnm = jnm + 1
+        legpolys(ilat,jm,jn) = rpnm(ilat,jnm)
+      end do
+    end do
+  end do
+
+  !jgl = 1
+  !print*,"buffer-supolf: sinlat=",sinlats(jgl)," ZLFPOL=",legpolys(jgl,0,:)
+
+end subroutine buffer_legendre_polynomials_ectrans
 
 !===================================================================================================
 
@@ -1578,7 +1700,7 @@ subroutine compute_analytic_solution(gelam, gelat, kzonal, ktotal, kimag, legpol
     do jrof=1,iend
       !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
       !print *,"C: result=",sph_analytic(jrof,ibl)
-      sph_analytic(jrof,ibl) = analytic_spherical_harmonic_point( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(klatidxs(jrof,ibl), ktotal, kzonal))
+      sph_analytic(jrof,ibl) = analytic_spherical_harmonic_point( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(klatidxs(jrof,ibl), kzonal, ktotal))
       !print *,"Fortran: result=",sph_analytic(jrof,ibl)
       !stop "debugging"
       !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
@@ -1609,15 +1731,15 @@ function analytic_spherical_harmonic_point(n, m, lon, lat, imag, legpoly) result
     if (imag) then
       pointValue = 0.0
     else
-      pointValue = (K(n, m) * legpoly)
+      pointValue = legpoly
     end if
   end if
 
   if (m > 0) then
     if (imag) then
-        pointValue = (-2 * K(n, m) * sin(m * lon) * legpoly)
+        pointValue = (-2 * sin(m * lon) * legpoly)
     else
-        pointValue = (2 * K(n, m) * cos(m * lon) * legpoly)
+        pointValue = (2 * cos(m * lon) * legpoly)
     end if
   end if
 !print*,"Fortran: K=",K(n,m)," P=",P(n, m, sinlat)," result=",pointValue
@@ -1670,6 +1792,16 @@ recursive function P(n, m, x) result(legPoly)
   end if
 end function P
 
+! Pn: associated Legendre polynomials with normalization used in ectrans (see Belousov 1962 p.5, in particular eq.5)
+function Pn(n, m, x) result(legPolyNorm)
+  implicit none
+  integer(jpim) :: n, m
+  real(jprd) :: x, legPolyNorm
+
+  legPolyNorm = K(n, m) * P(n, m, x)
+
+end function Pn
+
 function K(n, m) result(kFactor)
   implicit none
   integer(jpim) :: n, m
@@ -1717,9 +1849,9 @@ function analytic_northsouth_derivative_point(n, m, lon, lat, imag, legpolyp1, l
       pointValue = 0.0
     else
       if (n > m) then
-        pointValue = (K(n-1, m) * coeff_a * legpolym1 + K(n+1, m) * coeff_b * legpolyp1) / (zra * coslat)
+        pointValue = (coeff_a * legpolym1 + coeff_b * legpolyp1) / (zra * coslat)
       else
-        pointValue = (K(n+1, m) * coeff_b * legpolyp1) / (zra * coslat)
+        pointValue = (coeff_b * legpolyp1) / (zra * coslat)
       end if
     end if
   end if
@@ -1727,15 +1859,15 @@ function analytic_northsouth_derivative_point(n, m, lon, lat, imag, legpolyp1, l
   if (m > 0) then
     if (n > m) then
       if (imag) then
-          pointValue = -2 * sin(m * lon) * (K(n-1, m) * coeff_a * legpolym1 + K(n+1, m) * coeff_b * legpolyp1) / (zra * coslat);
+          pointValue = -2 * sin(m * lon) * (coeff_a * legpolym1 + coeff_b * legpolyp1) / (zra * coslat);
       else
-          pointValue = 2 * cos(m * lon) * (K(n-1, m) * coeff_a * legpolym1 + K(n+1, m) * coeff_b * legpolyp1) / (zra * coslat);
+          pointValue = 2 * cos(m * lon) * (coeff_a * legpolym1 + coeff_b * legpolyp1) / (zra * coslat);
       end if
     else
       if (imag) then
-          pointValue = -2 * sin(m * lon) * (K(n+1, m) * coeff_b * legpolyp1) / (zra * coslat);
+          pointValue = -2 * sin(m * lon) * (coeff_b * legpolyp1) / (zra * coslat);
       else
-          pointValue = 2 * cos(m * lon) * (K(n+1, m) * coeff_b * legpolyp1) / (zra * coslat);
+          pointValue = 2 * cos(m * lon) * (coeff_b * legpolyp1) / (zra * coslat);
       end if
     end if
   end if
@@ -1762,7 +1894,7 @@ subroutine compute_analytic_eastwest_derivative(gelam, gelat, kzonal, ktotal, ki
     ibl  = (jkglo-1)/nproma+1
     do jrof=1,iend
 !      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_eastwest_derivative( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
-      sph_analytic(jrof,ibl) = analytic_eastwest_derivative_point( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(klatidxs(jrof,ibl), ktotal, kzonal))
+      sph_analytic(jrof,ibl) = analytic_eastwest_derivative_point( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(klatidxs(jrof,ibl), kzonal, ktotal))
       !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
     end do
   end do
@@ -1780,8 +1912,8 @@ subroutine compute_analytic_northsouth_derivative(gelam, gelat, kzonal, ktotal, 
   integer(kind=jpim), intent(in) :: kzonal, ktotal
   logical, intent(in) :: kimag
   real(kind=jprd), dimension(nlats, 0:nsmax, 0:nsmax), intent(in) :: legpolys
-  integer(kind=jpim), dimension(nproma,ngpblks), intent(in) :: klatidxs
   real(kind=jprd) :: legpolyp1, legpolym1
+  integer(kind=jpim), dimension(nproma,ngpblks), intent(in) :: klatidxs
   integer(kind=jpim) :: jkglo, iend, ioff, ibl, jrof
 
   legpolyp1 = 0.0
@@ -1793,10 +1925,10 @@ subroutine compute_analytic_northsouth_derivative(gelam, gelat, kzonal, ktotal, 
     ibl  = (jkglo-1)/nproma+1
     do jrof=1,iend
       if(ktotal<nsmax) then
-        legpolyp1 = legpolys(klatidxs(jrof,ibl), ktotal+1, kzonal)
+        legpolyp1 = legpolys(klatidxs(jrof,ibl), kzonal, ktotal+1)
       end if
       if(ktotal>0) then
-        legpolym1 = legpolys(klatidxs(jrof,ibl), ktotal-1, kzonal)
+        legpolym1 = legpolys(klatidxs(jrof,ibl), kzonal, ktotal-1)
       end if
       !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
       !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_northsouth_derivative( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
