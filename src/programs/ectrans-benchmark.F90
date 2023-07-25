@@ -112,11 +112,17 @@ real(kind=jprb), pointer :: zspdiv(:,:) => null()
 real(kind=jprb), pointer :: zspsc3a(:,:,:) => null()
 real(kind=jprb), allocatable :: zspsc2(:,:)
 real(kind=jprb), allocatable :: zave(:),zmin(:),zmax(:),zreel(:,:,:)
-real(kind=jprd), allocatable :: zgelam(:,:),zgelat(:,:),zsph_analytic(:,:),zewde_analytic(:,:),znsde_analytic(:,:),zsinlats(:),zlegpolys(:,:,:)
+real(kind=jprd), allocatable :: zgelam(:,:),zgelat(:,:)
+real(kind=jprd), allocatable :: zsph_analytic(:,:)
+real(kind=jprd), allocatable :: zewde_analytic(:,:)
+real(kind=jprd), allocatable :: znsde_analytic(:,:)
+real(kind=jprd), allocatable :: zsinlats(:)
+real(kind=jprd), allocatable :: zlegpolys(:,:,:)
+real(kind=jprd), allocatable :: zlegpolys2(:,:,:)
 
 logical :: lstack = .false. ! Output stack info
-logical :: luserpnm = .false.
-logical :: lkeeprpnm = .false.
+logical :: luserpnm = .true.
+logical :: lkeeprpnm = .true.
 logical :: luseflt = .false. ! Use fast legendre transforms
 logical :: ltrace_stats = .false.
 logical :: lstats_omp = .false.
@@ -544,7 +550,7 @@ zgp2  => zgmvs(:,:,:)
 allocate(zgelam(nproma,ngpblks),zgelat(nproma,ngpblks),zsph_analytic(nproma,ngpblks), &
   & zewde_analytic(nproma,ngpblks),znsde_analytic(nproma,ngpblks),nlatidxs(nproma,ngpblks),zsinlats(ndgl))
 call calc_gelam_gelat(zgelam, zgelat, nlatidxs, zsinlats, nlats)
-allocate(zlegpolys(nlats,0:nsmax,0:nsmax))
+allocate(zlegpolys(nlats,0:nsmax,0:nsmax),zlegpolys2(nlats,0:nsmax,0:nsmax))
 !zlegpolys = 0.0
 !call buffer_legendre_polynomials(nsmax, nlats, zsinlats, zlegpolys)
 !print*,"instable version: legpolys=",zlegpolys(1,0,:)
@@ -552,11 +558,14 @@ allocate(zlegpolys(nlats,0:nsmax,0:nsmax))
 !call buffer_legendre_polynomials_belusov(nsmax, nlats, zsinlats, zlegpolys)
 !  print*,"belusov: legpolys=",zlegpolys(1,0,:)
 zlegpolys = 0.0
+call buffer_legendre_polynomials_ectrans(nsmax, nlats, zsinlats, zlegpolys2)
+!stop "debugging before calling buffer_legendre_polynomials_supolf"
+print*,"ectrans: legpolys=",zlegpolys2(1,nsmax-3,:)
+zlegpolys = 0.0
 call buffer_legendre_polynomials_supolf(nsmax, nlats, zsinlats, zlegpolys)
-!print*,"supolf: legpolys=",zlegpolys(1,0,:)
-!zlegpolys = 0.0
-!call buffer_legendre_polynomials_ectrans(nsmax, nlats, zsinlats, zlegpolys)
-!print*,"ectrans: legpolys=",zlegpolys(1,0,:)
+print*,"supolf: legpolys=",zlegpolys(1,nsmax-3,:)
+call check_legendre_polynomials(nsmax, nlats, zlegpolys, zlegpolys2)
+
 call compute_analytic_solution(zgelam, zgelat, nzonal, ntotal, limag, zlegpolys, nlatidxs, zsph_analytic)
 
 !===================================================================================================
@@ -1548,7 +1557,7 @@ subroutine buffer_legendre_polynomials(nsmax, nlats, sinlats, legpolys)
   real(kind=jprd), dimension(nlats), intent(in) :: sinlats
   real(kind=jprd), dimension(nlats, 0:nsmax, 0:nsmax), intent(out) :: legpolys
   real(kind=jprd) :: x
-  integer(kind=jpim) :: n, m
+  integer(kind=jpim) :: n, m, ilat
 
   do n = 0,nsmax
     do ilat = 1,nlats
@@ -1636,7 +1645,8 @@ subroutine buffer_legendre_polynomials_supolf(nsmax, nlats, sinlats, legpolys)
   real(kind=jprd), dimension(nlats), intent(in) :: sinlats
   real(kind=jprd), dimension(nlats, 0:nsmax, 0:nsmax), intent(out) :: legpolys
   integer(kind=jpim) :: km, jgl
-
+  integer(kind=jpim), dimension(nsmax) :: ndglu
+  !stop "debugging in buffer_legendre_polynomials_supolf"
   call ini_pol_test(nsmax)
   do jgl=1,nlats
     do km=0,nsmax
@@ -1644,11 +1654,26 @@ subroutine buffer_legendre_polynomials_supolf(nsmax, nlats, sinlats, legpolys)
     end do
   end do
 
+  ! remove unused high wavenumbers at high latitudes
+  !call trans_inq(kdglu=ndglu)
+  !do jm=0,nsmax
+  !  do ilat=
+  !do ilat=1,nlats
+  !  do jm=0,nsmax+1
+  !    do jn=jm,nsmax+1
+  !      if() legpolys(ilat,jm,jn) = rpnm(ilat,jnm)
+  !    end do
+  !  end do
+  !end do
   !jgl = 1
   !print*,"buffer-supolf: sinlat=",sinlats(jgl)," ZLFPOL=",legpolys(jgl,0,:)
 
 end subroutine buffer_legendre_polynomials_supolf
 
+!===================================================================================================
+
+! Using ectrans via trans_inq to retrieve the Legendre polynomials
+! Caution: ectrans only returns the Legendre polynomials in single precision!!! (supol and supolf return them in double precision)
 subroutine buffer_legendre_polynomials_ectrans(nsmax, nlats, sinlats, legpolys)
 
   use supolf_test_mod, only: supolf_test
@@ -1659,17 +1684,21 @@ subroutine buffer_legendre_polynomials_ectrans(nsmax, nlats, sinlats, legpolys)
   integer(kind=jpim), intent(in) :: nsmax, nlats
   real(kind=jprd), dimension(nlats), intent(in) :: sinlats
   real(kind=jprd), dimension(nlats, 0:nsmax, 0:nsmax), intent(out) :: legpolys
-  real(kind=jprb), dimension(ndgl,nsmax*nsmax/2) :: rpnm
-  integer(kind=jpim) :: jnm, jn, jm
+  real(kind=jprb), dimension(ndgl,(nsmax+2)*(nsmax+3)/2) :: rpnm
+  integer(kind=jpim) :: jnm, jn, jninv, jm, ilat
 
   call trans_inq(prpnm=rpnm)
+  !print*,"rpnm(1,:)=",rpnm(1,:)
+  print*,"rpnm: dimension 1: ",lbound(rpnm,1)," to ",ubound(rpnm,1)," dimension 2: ",lbound(rpnm,2)," to ",ubound(rpnm,2)
 
+  !stop "debugging in buffer_legendre_polynomials_ectrans"
   do ilat=1,nlats
     jnm = 0
-    do jn=0,nsmax
-      do jm=0,jn
+    do jm=0,nsmax+1
+      do jninv=jm,nsmax+1
+        jn = nsmax+1-jninv+jm
         jnm = jnm + 1
-        legpolys(ilat,jm,jn) = rpnm(ilat,jnm)
+        if(jm<=nsmax .and. jn<=nsmax) legpolys(ilat,jm,jn) = rpnm(ilat,jnm)
       end do
     end do
   end do
@@ -1678,6 +1707,42 @@ subroutine buffer_legendre_polynomials_ectrans(nsmax, nlats, sinlats, legpolys)
   !print*,"buffer-supolf: sinlat=",sinlats(jgl)," ZLFPOL=",legpolys(jgl,0,:)
 
 end subroutine buffer_legendre_polynomials_ectrans
+
+!===================================================================================================
+
+subroutine check_legendre_polynomials(nsmax, nlats, legpolys, legpolys2)
+
+  implicit none
+
+  integer(kind=jpim), intent(in) :: nsmax, nlats
+  real(kind=jprd), dimension(nlats, 0:nsmax, 0:nsmax), intent(in) :: legpolys, legpolys2
+  integer(kind=jpim) :: ilat, jm, jn
+  logical :: lprint
+
+
+  write(33320,'("Legendre coefficients")')
+  write(33320,'("ilat   m   n ┃     supolf    ectrans ")')
+  write(33320,'("━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━┿")')
+  do ilat=1,nlats/2
+    do jm=0,nsmax
+      do jn=jm,nsmax
+        lprint = .false.
+        !print*,ilat,jm,jn,abs(legpolys(ilat,jm,jn)),abs(legpolys2(ilat,jm,jn))
+        if(legpolys(ilat,jm,jn)==legpolys(ilat,jm,jn) .and. legpolys2(ilat,jm,jn)==legpolys2(ilat,jm,jn)) then ! just to be sure that there are no nans
+          if(max(abs(legpolys(ilat,jm,jn)),abs(legpolys2(ilat,jm,jn)))>0) then
+            if(abs(legpolys(ilat,jm,jn)-legpolys2(ilat,jm,jn))/max(abs(legpolys(ilat,jm,jn)),abs(legpolys2(ilat,jm,jn)))>1E-5) then
+              lprint = .true.
+            end if
+          end if
+        else
+          !lprint = .true.
+        end if
+        if(lprint) write(33320,'(i4,i4,i4," ┃",e11.3,e11.3,e11.3,e11.3,e11.3)') ilat, jm, jn, legpolys(ilat,jm,jn), legpolys2(ilat,jm,jn),abs(legpolys(ilat,jm,jn)-legpolys2(ilat,jm,jn)),max(abs(legpolys(ilat,jm,jn)),abs(legpolys2(ilat,jm,jn))),abs(legpolys(ilat,jm,jn)-legpolys2(ilat,jm,jn))/max(abs(legpolys(ilat,jm,jn)),abs(legpolys2(ilat,jm,jn)))
+      end do
+    end do
+  end do
+  
+end subroutine check_legendre_polynomials
 
 !===================================================================================================
 
