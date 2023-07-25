@@ -46,7 +46,7 @@ use mpl_module
 use yomgstats, only: jpmaxstat
 use yomhook, only : dr_hook_init
 use ectrans_init_spherical_harmonic_mod, only : ectrans_init_spherical_harmonic, ectrans_init_spherical_harmonic_eastwest_derivative, ectrans_init_spherical_harmonic_northsouth_derivative, ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded, ectrans_init_spherical_harmonic_hardcoded
-use analytic_solutions_mod, only: calc_gelam_gelat, buffer_legendre_polynomials, buffer_legendre_polynomials_belusov, buffer_legendre_polynomials_supolf, buffer_legendre_polynomials_ectrans, check_legendre_polynomials, compute_analytic_solution, compute_analytic_eastwest_derivative, compute_analytic_northsouth_derivative
+use analytic_solutions_mod, only: analytic_init, analytic_end, buffer_legendre_polynomials, buffer_legendre_polynomials_belusov, buffer_legendre_polynomials_supolf, buffer_legendre_polynomials_ectrans, check_legendre_polynomials, compute_analytic_solution, compute_analytic_eastwest_derivative, compute_analytic_northsouth_derivative
 
 implicit none
 
@@ -550,24 +550,14 @@ zgp2  => zgmvs(:,:,:)
 
 allocate(zgelam(nproma,ngpblks),zgelat(nproma,ngpblks),zsph_analytic(nproma,ngpblks), &
   & zewde_analytic(nproma,ngpblks),znsde_analytic(nproma,ngpblks),nlatidxs(nproma,ngpblks),zsinlats(ndgl))
-call calc_gelam_gelat(nproma, ngpblks, ndgl, n_regions_ns, n_regions_ew, nloen, zgelam, zgelat, nlatidxs, zsinlats, nlats)
-allocate(zlegpolys(nlats,0:nsmax,0:nsmax),zlegpolys2(nlats,0:nsmax,0:nsmax))
-!zlegpolys = 0.0
-!call buffer_legendre_polynomials(nsmax, nlats, zsinlats, zlegpolys)
-!print*,"instable version: legpolys=",zlegpolys(1,0,:)
-!zlegpolys = 0.0
-!call buffer_legendre_polynomials_belusov(nsmax, nlats, zsinlats, zlegpolys)
-!  print*,"belusov: legpolys=",zlegpolys(1,0,:)
-zlegpolys = 0.0
-call buffer_legendre_polynomials_ectrans(nsmax, nlats, ndgl, zsinlats, zlegpolys2)
-!stop "debugging before calling buffer_legendre_polynomials_supolf"
-print*,"ectrans: legpolys=",zlegpolys2(1,nsmax-3,:)
-zlegpolys = 0.0
-call buffer_legendre_polynomials_supolf(nsmax, nlats, zsinlats, zlegpolys)
-print*,"supolf: legpolys=",zlegpolys(1,nsmax-3,:)
-call check_legendre_polynomials(nsmax, nlats, zlegpolys, zlegpolys2)
+call analytic_init(nproma, ngpblks, ndgl, n_regions_ns, n_regions_ew, nloen)
+!call buffer_legendre_polynomials(nsmax)
+!call buffer_legendre_polynomials_belusov(nsmax)
+call buffer_legendre_polynomials_ectrans(nsmax, ndgl)
+call buffer_legendre_polynomials_supolf(nsmax)
+call check_legendre_polynomials(nsmax, ndgl)
 
-call compute_analytic_solution(nproma, ngpblks, nlats, nsmax, ngptot, zgelam, zgelat, nzonal, ntotal, limag, zlegpolys, nlatidxs, zsph_analytic)
+call compute_analytic_solution(nproma, ngpblks, nsmax, ngptot, nzonal, ntotal, limag, zsph_analytic)
 
 !===================================================================================================
 ! Allocate norm arrays
@@ -680,13 +670,13 @@ do jstep = 1, iters
           & ldscders=.true.,                   & ! scalar derivatives
           & kvsetsc=ivsetsc,                   &
           & pgp=zreel)
-        call compute_analytic_solution(nproma, ngpblks, nlats, nsmax, ngptot, zgelam, zgelat, nzonal, ntotal, limag, zlegpolys, nlatidxs, zsph_analytic)
+        call compute_analytic_solution(nproma, ngpblks, nsmax, ngptot, nzonal, ntotal, limag, zsph_analytic)
         !!write(33334,*)"nzonal=",nzonal," ntotal=",ntotal," zreel=",zreel(1,1,1)," anal=",zsph_analytic(1,1)
         !if (sum((zsph_analytic(:,:))**2)>0) write(33335,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,1,:)-zsph_analytic(:,:))**2)/ngptot/sum((zsph_analytic(:,:))**2))
         !if(sign(1,zreel(1,1,1))/=sign(1,zsph_analytic(1,1))) write(33333,*)"nzonal=",nzonal," ntotal=",ntotal
-        call compute_analytic_eastwest_derivative(nproma, ngpblks, nlats, nsmax, ngptot, zgelam, zgelat, nzonal, ntotal, limag, zlegpolys, nlatidxs, zewde_analytic)
+        call compute_analytic_eastwest_derivative(nproma, ngpblks, nsmax, ngptot, nzonal, ntotal, limag, zewde_analytic)
         !if (sum((zewde_analytic(:,:))**2)>0) write(33336,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,3,:)-zewde_analytic(:,:))**2)/ngptot/sum((zewde_analytic(:,:))**2))
-        call compute_analytic_northsouth_derivative(nproma, ngpblks, nlats, nsmax, ngptot, zgelam, zgelat, nzonal, ntotal, limag, zlegpolys, nlatidxs, znsde_analytic)
+        call compute_analytic_northsouth_derivative(nproma, ngpblks, nsmax, ngptot, nzonal, ntotal, limag, znsde_analytic)
         !if (sum((znsde_analytic(:,:))**2)>0) write(33339,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,2,:)-znsde_analytic(:,:))**2)/ngptot/sum((znsde_analytic(:,:))**2))
         !write(33341,'("nzonal=",i0," ntotal=",i0," nsde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,2,:)),maxval(znsde_analytic(:,:))
         !write(33337,'("nzonal=",i0," ntotal=",i0," ewde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,3,:)),maxval(zewde_analytic(:,:))
