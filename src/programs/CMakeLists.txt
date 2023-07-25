@@ -16,12 +16,12 @@ if( HAVE_TOOLS )
 
   ecbuild_warn_var( ECTRANS_TOOLS_RTABLE_PATH )
 
-  file( GLOB ectrans_programs *.F90 )
+  file( GLOB ectrans_programs ectrans-benchmark.F90 )
   foreach( _program IN ITEMS ${ectrans_programs} )
     get_filename_component( _program ${_program} NAME_WE )
 
     ecbuild_add_executable(TARGET ${_program}
-      SOURCES ${_program}.F90
+      SOURCES ${_program}.F90 analytic_solutions_mod.F90
       LIBS ${trans} ectrans_init_spherical_harmonic
       LINKER_LANGUAGE Fortran
       DEFINITIONS ECTRANS_TOOLS_RTABLE_PATH="${ECTRANS_TOOLS_RTABLE_PATH}" )
@@ -30,11 +30,16 @@ if( HAVE_TOOLS )
 
 endif()
 
+ecbuild_list_add_pattern( LIST analytic_test_files
+                          GLOB
+                                analytic_test/*
+                          QUIET
+                        )
 
 foreach( prec sp )
   if( HAVE_${prec} )
     ecbuild_add_executable(TARGET  ectrans-benchmark-${prec}
-                          SOURCES ectrans-benchmark.F90
+                          SOURCES ectrans-benchmark.F90 ${analytic_test_files}
                           LIBS
                             fiat
                             parkind_${prec}
@@ -47,7 +52,7 @@ foreach( prec sp )
         if( HAVE_${gpumethod} )
           if( gpumethod STREQUAL acc )
             ecbuild_add_executable(TARGET  ectrans-benchmark-gpu-${prec}-${gpumethod}
-                                  SOURCES ectrans-benchmark.F90
+                                  SOURCES ectrans-benchmark.F90 ${analytic_test_files}
                                   LINKER_LANGUAGE Fortran
                                   LIBS
                                     fiat
@@ -61,7 +66,7 @@ foreach( prec sp )
 
           if( gpumethod STREQUAL omp )
             ecbuild_add_executable(TARGET  ectrans-benchmark-gpu-${prec}-${gpumethod}
-                                  SOURCES ectrans-benchmark.F90
+                                  SOURCES ectrans-benchmark.F90 ${analytic_test_files}
                                   LINKER_LANGUAGE Fortran
                                   LIBS
                                     fiat
