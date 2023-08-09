@@ -252,43 +252,6 @@ module analytic_solutions_mod
 
   !===================================================================================================
   
-  subroutine check_legendre_polynomials(nsmax, ndgl)
-  
-    implicit none
-  
-    integer(kind=jpim), intent(in) :: nsmax, ndgl
-    integer(kind=jpim) :: ilat, jm, jn
-    logical :: lprint
-  
-  
-    write(33320,'("Legendre coefficients")')
-    write(33320,'("ilat   m   n ┃     supolf    ectrans ")')
-    write(33320,'("━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━┿")')
-    do ilat=nfirstlat, nlastlat
-      if(ilat<ndgl/2) then
-        do jm=0,nsmax
-          do jn=jm,nsmax
-            lprint = .false.
-            !print*,ilat,jm,jn,abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn))
-            if(legpolys(ilat,jm,jn)==legpolys(ilat,jm,jn) .and. legpolys_ectrans(ilat,jm,jn)==legpolys_ectrans(ilat,jm,jn)) then ! just to be sure that there are no nans
-              if(max(abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn)))>0) then
-                if(abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))/max(abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn)))>1E-5) then
-                  lprint = .true.
-                end if
-              end if
-            else
-              !lprint = .true.
-            end if
-            if(lprint) write(33320,'(i4,i4,i4," ┃",e11.3,e11.3,e11.3,e11.3,e11.3)') ilat, jm, jn, legpolys(ilat,jm,jn), legpolys_ectrans(ilat,jm,jn),abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn)),max(abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn))),abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))/max(abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn)))
-          end do
-        end do
-      end if
-    end do
-    
-  end subroutine check_legendre_polynomials
-  
-  !===================================================================================================
-  
   subroutine compute_analytic_solution(nproma, ngpblks, nsmax, ngptot, kzonal, ktotal, kimag, sph_analytic)
   
     implicit none
@@ -560,6 +523,114 @@ module analytic_solutions_mod
     end do
   
   end subroutine compute_analytic_northsouth_derivative
+  
+  !===================================================================================================
+  
+  subroutine check_legendre_polynomials(nsmax, ndgl)
+  
+    implicit none
+  
+    integer(kind=jpim), intent(in) :: nsmax, ndgl
+    integer(kind=jpim) :: ilat, jm, jn
+    logical :: lprint
+  
+  
+    write(33320,'("Legendre coefficients")')
+    write(33320,'("ilat   m   n ┃     supolf    ectrans ")')
+    write(33320,'("━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━┿")')
+    do ilat=nfirstlat, nlastlat
+      if(ilat<ndgl/2) then
+        do jm=0,nsmax
+          do jn=jm,nsmax
+            lprint = .false.
+            !print*,ilat,jm,jn,abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn))
+            if(legpolys(ilat,jm,jn)==legpolys(ilat,jm,jn) .and. legpolys_ectrans(ilat,jm,jn)==legpolys_ectrans(ilat,jm,jn)) then ! just to be sure that there are no nans
+              if(max(abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn)))>0) then
+                if(abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))/max(abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn)))>1E-5) then
+                  lprint = .true.
+                end if
+              end if
+            else
+              !lprint = .true.
+            end if
+            if(lprint) write(33320,'(i4,i4,i4," ┃",e11.3,e11.3,e11.3,e11.3,e11.3)') ilat, jm, jn, legpolys(ilat,jm,jn), legpolys_ectrans(ilat,jm,jn),abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn)),max(abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn))),abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))/max(abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn)))
+          end do
+        end do
+      end if
+    end do
+    
+  end subroutine check_legendre_polynomials
+
+  !===================================================================================================
+
+  function check_lmax_all_fields(rtolerance, lwrite_errors, nzonal, ntotal, zreel, zgp2, zgp3a, zsph_analytic, znsde_analytic, zewde_analytic) result(lpassed)
+
+    implicit none
+
+    real(kind=jprb), intent(in) :: rtolerance
+    logical, intent(in) :: lwrite_errors
+    integer(kind=jpim), intent(in) :: nzonal, ntotal
+    real(kind=jprb), intent(in) :: zreel(:,:,:), zgp2(:,:,:), zgp3a(:,:,:,:)
+    real(kind=jprd), intent(in) :: zsph_analytic(:,:), znsde_analytic(:,:), zewde_analytic(:,:)
+    real(kind=jprd) :: lmaxrelquo, lmaxnsderelquo, lmaxewderelquo, lmaxrelfac, lmaxnsderelfac, lmaxewderelfac
+    real(kind=jprd) :: lmax_error1, lmax_nsde_error1, lmax_ewde_error1
+    real(kind=jprd) :: lmax_error2, lmax_nsde_error2, lmax_ewde_error2
+    real(kind=jprd) :: lmax_error3, lmax_nsde_error3, lmax_ewde_error3
+    logical :: lpassed
+    logical :: lpassed1, lpassed_nsde1, lpassed_ewde1
+    logical :: lpassed2, lpassed_nsde2, lpassed_ewde2
+    logical :: lpassed3, lpassed_nsde3, lpassed_ewde3
+
+    print*,"DEBUGGING: checking errors with tolerance ", rtolerance
+    lmaxrelquo = maxval(abs( zsph_analytic(:,:)))
+    lmaxnsderelquo = maxval(abs(znsde_analytic(:,:)))
+    lmaxewderelquo = maxval(abs(zewde_analytic(:,:)))
+    lmaxrelfac = 1.0_jprd
+    lmaxnsderelfac = 1.0_jprd
+    lmaxewderelfac = 1.0_jprd
+    if(    lmaxrelquo>0.0)     lmaxrelfac = 1.0_jprd/    lmaxrelquo
+    if(lmaxnsderelquo>0.0) lmaxnsderelfac = 1.0_jprd/lmaxnsderelquo
+    if(lmaxewderelquo>0.0) lmaxewderelfac = 1.0_jprd/lmaxewderelquo
+    lmax_error1      = maxval(abs(  zreel(:,1,:)- zsph_analytic(:,:)))*lmaxrelfac
+    lmax_error2      = maxval(abs(   zgp2(:,1,:)- zsph_analytic(:,:)))*lmaxrelfac
+    lmax_error3      = maxval(abs(zgp3a(:,1,1,:)- zsph_analytic(:,:)))*lmaxrelfac
+    lmax_nsde_error1 = maxval(abs(  zreel(:,2,:)-znsde_analytic(:,:)))*lmaxnsderelfac
+    lmax_nsde_error2 = maxval(abs(   zgp2(:,2,:)-znsde_analytic(:,:)))*lmaxnsderelfac
+    lmax_nsde_error3 = maxval(abs(zgp3a(:,1,2,:)-znsde_analytic(:,:)))*lmaxnsderelfac
+    lmax_ewde_error1 = maxval(abs(  zreel(:,3,:)-zewde_analytic(:,:)))*lmaxewderelfac
+    lmax_ewde_error2 = maxval(abs(   zgp2(:,3,:)-zewde_analytic(:,:)))*lmaxewderelfac
+    lmax_ewde_error3 = maxval(abs(zgp3a(:,1,3,:)-zewde_analytic(:,:)))*lmaxewderelfac
+    if(lwrite_errors) then
+      write(33342,'(i4,i4," ┃",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3)') nzonal,ntotal, &
+      & lmax_error1, &
+      & lmax_error2, &
+      & lmax_error3, &
+      & lmax_nsde_error1, &
+      & lmax_nsde_error2, &
+      & lmax_nsde_error3, &
+      & lmax_ewde_error1, &
+      & lmax_ewde_error2, &
+      & lmax_ewde_error3
+  !   & sqrt(sum((zgp3a(:,1,3,:)-zewde_analytic(:,:))**2)/ngptot)*lmaxewderelfac
+    end if
+
+    lpassed1      = (lmax_error1      < rtolerance)
+    lpassed_nsde1 = (lmax_error2      < rtolerance)
+    lpassed_ewde1 = (lmax_error3      < rtolerance)
+    lpassed2      = (lmax_nsde_error1 < rtolerance)
+    lpassed_nsde2 = (lmax_nsde_error2 < rtolerance)
+    lpassed_ewde2 = (lmax_nsde_error3 < rtolerance)
+    lpassed3      = (lmax_ewde_error1 < rtolerance)
+    lpassed_nsde3 = (lmax_ewde_error2 < rtolerance)
+    lpassed_ewde3 = (lmax_ewde_error3 < rtolerance)
+    if((.not. lpassed1) .and. (.not. lpassed2) .and. (.not. lpassed3)) then
+    end if
+    
+    lpassed = (lpassed1 .and. lpassed_nsde1 .and. lpassed_ewde1 .and. &
+    &          lpassed2 .and. lpassed_nsde2 .and. lpassed_ewde2 .and. &
+    &          lpassed3 .and. lpassed_nsde3 .and. lpassed_ewde3)
+  
+  end function check_lmax_all_fields
   
   !===================================================================================================
   

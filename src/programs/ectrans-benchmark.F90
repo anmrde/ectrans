@@ -46,7 +46,11 @@ use mpl_module
 use yomgstats, only: jpmaxstat
 use yomhook, only : dr_hook_init
 use ectrans_init_spherical_harmonic_mod, only : ectrans_init_spherical_harmonic, ectrans_init_spherical_harmonic_eastwest_derivative, ectrans_init_spherical_harmonic_northsouth_derivative, ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded, ectrans_init_spherical_harmonic_hardcoded
-use analytic_solutions_mod, only: analytic_init, analytic_end, buffer_legendre_polynomials, buffer_legendre_polynomials_belusov, buffer_legendre_polynomials_supolf, buffer_legendre_polynomials_ectrans, check_legendre_polynomials, compute_analytic_solution, compute_analytic_eastwest_derivative, compute_analytic_northsouth_derivative
+use analytic_solutions_mod, only: analytic_init, analytic_end, buffer_legendre_polynomials, &
+& buffer_legendre_polynomials_belusov, buffer_legendre_polynomials_supolf, &
+& buffer_legendre_polynomials_ectrans, check_legendre_polynomials, &
+& compute_analytic_solution, compute_analytic_eastwest_derivative, &
+& compute_analytic_northsouth_derivative, gelam, gelat, check_lmax_all_fields
 
 implicit none
 
@@ -113,7 +117,6 @@ real(kind=jprb), pointer :: zspdiv(:,:) => null()
 real(kind=jprb), pointer :: zspsc3a(:,:,:) => null()
 real(kind=jprb), allocatable :: zspsc2(:,:)
 real(kind=jprb), allocatable :: zave(:),zmin(:),zmax(:),zreel(:,:,:)
-real(kind=jprd), allocatable :: zgelam(:,:),zgelat(:,:)
 real(kind=jprd), allocatable :: zsph_analytic(:,:)
 real(kind=jprd), allocatable :: zewde_analytic(:,:)
 real(kind=jprd), allocatable :: znsde_analytic(:,:)
@@ -143,8 +146,10 @@ logical :: lvordiv = .false.
 logical :: lscders = .false.
 logical :: luvders = .false.
 logical :: lprint_norms = .false. ! Calculate and print spectral norms
+logical :: lwrite_errors = .false. ! Write error files for all tested wavenumbers
 logical :: lmeminfo = .false. ! Show information from FIAT routine ec_meminfo at the end
 logical :: lgpnorms = .false. ! print gpnorms
+real(kind=jprb) :: rtolerance = 1e-4 ! maximum relative lmax error tolerance for passing analytyic solution tests
 
 integer(kind=jpim) :: nstats_mem = 0
 integer(kind=jpim) :: ntrace_stats = 0
@@ -212,6 +217,7 @@ integer(kind=jpim) :: jbegin_uder_EW = 0
 integer(kind=jpim) :: jend_uder_EW = 0
 integer(kind=jpim) :: jbegin_vder_EW = 0
 integer(kind=jpim) :: jend_vder_EW = 0
+logical :: lpassed = .true.
 
 logical :: ldump_values = .false.
 
@@ -240,7 +246,7 @@ luse_mpi = detect_mpirun()
 
 ! Setup
 call get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, lscders, luvders, lgpnorms, &
-  & luseflt, nproma, verbosity, ldump_values, lprint_norms, lmeminfo, nprtrv, nprtrw, ncheck, ntotal, nzonal, limag)
+  & luseflt, nproma, verbosity, ldump_values, lprint_norms, lwrite_errors, lmeminfo, nprtrv, nprtrw, ncheck, ntotal, nzonal, limag, rtolerance)
 if (cgrid == '') cgrid = cubic_octahedral_gaussian_grid(nsmax)
 call parse_grid(cgrid, ndgl, nloen)
 nflevg = nlev
@@ -540,7 +546,8 @@ else
 endif
 
 ndimgmv = jend_scder_EW
-
+!DEBUGGING:
+print*,"ndimgmv=",ndimgmv," ndimgmvs=",ndimgmvs
 allocate(zgmv(nproma,nflevg,ndimgmv,ngpblks))
 allocate(zgmvs(nproma,ndimgmvs,ngpblks))
 
@@ -548,8 +555,8 @@ zgpuv => zgmv(:,:,1:jend_vder_EW,:)
 zgp3a => zgmv(:,:,jbegin_sc:jend_scder_EW,:)
 zgp2  => zgmvs(:,:,:)
 
-allocate(zgelam(nproma,ngpblks),zgelat(nproma,ngpblks),zsph_analytic(nproma,ngpblks), &
-  & zewde_analytic(nproma,ngpblks),znsde_analytic(nproma,ngpblks),nlatidxs(nproma,ngpblks),zsinlats(ndgl))
+allocate(zsph_analytic(nproma,ngpblks),zewde_analytic(nproma,ngpblks), &
+  & znsde_analytic(nproma,ngpblks),nlatidxs(nproma,ngpblks),zsinlats(ndgl))
 call analytic_init(nproma, ngpblks, ndgl, n_regions_ns, n_regions_ew, nloen)
 !call buffer_legendre_polynomials(nsmax)
 !call buffer_legendre_polynomials_belusov(nsmax)
@@ -656,20 +663,45 @@ do jstep = 1, iters
     endif
     allocate(zreel(nproma,3,ngpblks))
     write(33334,'("values at grid point 5")')
-    write(33334,'("   m   n ┃  zreel analytic │ north-south  analytic │  east-west   analytic ")')
-    write(33334,'("━━━━━━━━━╋━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━")')
+    write(33334,'("         ┃      grid point data    │      north-south derivative      │       east-west derivative ")')
+    write(33334,'("   m   n ┃    pgp    pgp2 analytic │         pgp       pgp2  analytic │         pgp       pgp2  analytic ")')
+    write(33334,'("━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
     write(33341,'("maximum value")')
-    write(33341,'("   m   n ┃  zreel analytic │ north-south  analytic │  east-west   analytic ")')
-    write(33341,'("━━━━━━━━━╋━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━")')
+    write(33341,'("         ┃      grid point data    │      north-south derivative      │       east-west derivative ")')
+    write(33341,'("   m   n ┃    pgp    pgp2 analytic │        pgp       pgp2   analytic │         pgp       pgp2  analytic ")')
+    write(33341,'("━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
+    write(33342,'("lmax-error")')
+    write(33342,'("         ┃           grid point data        │      north-south derivative      │       east-west derivative ")')
+    write(33342,'("   m   n ┃        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a ")')
+    write(33342,'("━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
     do ntotal = 0,nsmax
       do nzonal = 0,ntotal
         zreel(:,:,:)=0._jprb
+        zgmv(:,:,:,:) = 0._jprb
+        zgmvs(:,:,:) = 0._jprb
         call initialize_spectral_arrays(nsmax, zspsc2, sp3d, nzonal, ntotal, limag)
+        ! single scalar transform
         call inv_trans(kresol=1, kproma=nproma, &
           & pspscalar=zspsc2(1:ilf,:),         & ! spectral scalar
           & ldscders=.true.,                   & ! scalar derivatives
           & kvsetsc=ivsetsc,                   &
           & pgp=zreel)
+        ! full time step
+        call inv_trans(kresol=1, kproma=nproma, &
+          & pspsc2=zspsc2,                     & ! spectral surface pressure
+          & pspvor=zspvor,                     & ! spectral vorticity
+          & pspdiv=zspdiv,                     & ! spectral divergence
+          & pspsc3a=zspsc3a,                   & ! spectral scalars
+          & ldscders=lscders,                  &
+          & ldvorgp=.false.,                   & ! no gridpoint vorticity
+          & lddivgp=.false.,                   & ! no gridpoint divergence
+          & lduvder=luvders,                   &
+          & kvsetuv=ivset,                     &
+          & kvsetsc2=ivsetsc,                  &
+          & kvsetsc3a=ivset,                   &
+          & pgp2=zgp2,                         &
+          & pgpuv=zgpuv,                       &
+          & pgp3a=zgp3a)
         call compute_analytic_solution(nproma, ngpblks, nsmax, ngptot, nzonal, ntotal, limag, zsph_analytic)
         !!write(33334,*)"nzonal=",nzonal," ntotal=",ntotal," zreel=",zreel(1,1,1)," anal=",zsph_analytic(1,1)
         !if (sum((zsph_analytic(:,:))**2)>0) write(33335,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,1,:)-zsph_analytic(:,:))**2)/ngptot/sum((zsph_analytic(:,:))**2))
@@ -677,72 +709,38 @@ do jstep = 1, iters
         call compute_analytic_eastwest_derivative(nproma, ngpblks, nsmax, ngptot, nzonal, ntotal, limag, zewde_analytic)
         !if (sum((zewde_analytic(:,:))**2)>0) write(33336,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,3,:)-zewde_analytic(:,:))**2)/ngptot/sum((zewde_analytic(:,:))**2))
         call compute_analytic_northsouth_derivative(nproma, ngpblks, nsmax, ngptot, nzonal, ntotal, limag, znsde_analytic)
+        lpassed = lpassed .and. check_lmax_all_fields(rtolerance, lwrite_errors, nzonal, ntotal, zreel, zgp2, zgp3a, zsph_analytic, znsde_analytic, zewde_analytic)
         !if (sum((znsde_analytic(:,:))**2)>0) write(33339,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,2,:)-znsde_analytic(:,:))**2)/ngptot/sum((znsde_analytic(:,:))**2))
         !write(33341,'("nzonal=",i0," ntotal=",i0," nsde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,2,:)),maxval(znsde_analytic(:,:))
         !write(33337,'("nzonal=",i0," ntotal=",i0," ewde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,3,:)),maxval(zewde_analytic(:,:))
-        write(33341,'(i4,i4," ┃",f8.4,f8.4," │",e11.3,e11.3," │",e11.3,e11.3)') nzonal,ntotal,maxval(zreel(:,1,:)),maxval(zsph_analytic(:,:)),maxval(zreel(:,2,:)),maxval(znsde_analytic(:,:)),maxval(zreel(:,3,:)),maxval(zewde_analytic(:,:))
+        write(33341,'(i4,i4," ┃",f8.4,f8.4,f8.4," │",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3)') nzonal,ntotal, &
+        & maxval(zreel(:,1,:)),maxval(zgp2(:,1,:)),maxval(zsph_analytic(:,:)), &
+        & maxval(zreel(:,2,:)),maxval(zgp2(:,2,:)),maxval(znsde_analytic(:,:)), &
+        & maxval(zreel(:,3,:)),maxval(zgp2(:,3,:)),maxval(zewde_analytic(:,:))
         igp = ngptot/3
-        write(33334,'(i4,i4," ┃",f8.4,f8.4," │",e11.3,e11.3," │",e11.3,e11.3)') nzonal,ntotal,zreel(igp,1,1),zsph_analytic(igp,1),zreel(igp,2,1),znsde_analytic(igp,1),zreel(igp,3,1),zewde_analytic(igp,1)
-        !if(nzonal == 1 .and. ntotal == 1) then
-        !  do i=1,2000
-        !    write(33338,'("lat=",f10.3," lon=",f10.3," sph=",e10.3," ana=",e10.3," nsDe=",e10.3," anaDe=",e10.3)') zgelat(i,1)*180/z_pi,zgelam(i,1)*180/z_pi,zreel(i,1,1),zsph_analytic(i,1),zreel(i,3,1),zewde_analytic(i,1)
-        !    write(33340,'("lat=",f10.3," lon=",f10.3," sph=",e10.3," ana=",e10.3," nsDe=",e10.3," anaDe=",e10.3)') zgelat(i,1)*180/z_pi,zgelam(i,1)*180/z_pi,zreel(i,1,1),zsph_analytic(i,1),zreel(i,2,1),znsde_analytic(i,1)
-        !  end do
-        !  print*,"33338 and 33340 written"
-        !end if
+        write(33334,'(i4,i4," ┃",f8.4,f8.4,f8.4," │",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3)') nzonal,ntotal,zreel(igp,1,1),zgp2(igp,1,1),zsph_analytic(igp,1),zreel(igp,2,1),zgp2(igp,2,1),znsde_analytic(igp,1),zreel(igp,3,1),zgp2(igp,3,1),zewde_analytic(igp,1)
+        if(nzonal == 1 .and. ntotal == 1) then
+          write(33338,'("point values for m=1 and n=1")')
+          write(33338,'("         ┃           grid point data        │      north-south derivative      │       east-west derivative ")')
+          write(33338,'("lat lon ┃        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a ")')
+          write(33338,'("━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
+          do i=1,ngptot
+            write(33338,'(f10.3,f10.3," ┃",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3)') &
+            & gelat(i,1)*180/z_pi,gelam(i,1)*180/z_pi, &
+            & zreel(i,1,1),zsph_analytic(i,1),zreel(i,1,1)-zsph_analytic(i,1), &
+            & zreel(i,2,1),znsde_analytic(i,1),zreel(i,2,1)-znsde_analytic(i,1), &
+            & zreel(i,3,1),zewde_analytic(i,1),zreel(i,3,1)-zewde_analytic(i,1)
+            !write(33340,'("lat=",f10.3," lon=",f10.3," sph=",e10.3," ana=",e10.3," nsDe=",e10.3," anaDe=",e10.3)') zgelat(i,1)*180/z_pi,zgelam(i,1)*180/z_pi,zreel(i,1,1),zsph_analytic(i,1),zreel(i,2,1),znsde_analytic(i,1)
+          end do
+          print*,"33338 and 33340 written"
+        end if
         print*,"m=",nzonal," n=",ntotal
+
+
       end do
     end do
-    stop "just debugging"
-!print*,"lat=",zgelat(1,1)," lon=",zgelam(1,1)
-!print*,"zreel=",zreel(1,1,1)," anal=",zsph_analytic(1,1)
-!print*,"zspsc2:",zspsc2(1,1:10)
-!print*,"zreel             zsph_analytic   relative error"
-!do i=1,20
-!  print*,zreel(i,1,1),real(zsph_analytic(i,1),kind=jprb), &
-!  &  abs(zreel(i,1,1)-real(zsph_analytic(i,1),kind=jprb))/real(zsph_analytic(i,1),kind=jprb)
-!end do
-!print*,"max:",maxval(zsph_analytic(:,1)/zreel(:,1,1))," min:",minval(zreel(:,1,1)/zsph_analytic(:,1))
-    if( lgpnorms ) then
-    ! reset prev value
-    ivsetsc(1) = iprev
-    write(nout,*) 'statistics gpnorm_trans ...'
-    call flush(nout)
-    ifld=3
-    allocate(zave(ifld))
-    allocate(zmin(ifld))
-    allocate(zmax(ifld))
-    call gpnorm_trans_cpu(zreel,ifld,nproma,zave,zmin,zmax,.false.,kresol=1)
-    !call gpnorm_trans(zreel,ifld,nproma,zave,zmin,zmax,.false.,kresol=1)
-    do jf=1,ifld
-    write(nout,*) '1st Statistics field= ',jf,' : ave,min,max ',zave(jf),zmin(jf),zmax(jf)
-    call flush(nout)
-    enddo
-    deallocate(zave)
-    deallocate(zmin)
-    deallocate(zmax)
-    endif
-    deallocate(zreel)
 
-    write(nout,*) 'standard time-step ...'
-    call flush(nout)
-    zgpuv(:,:,:,:) = 0._JPRB
-! full time step
-    call inv_trans(kresol=1, kproma=nproma, &
-       & pspsc2=zspsc2,                     & ! spectral surface pressure
-       & pspvor=zspvor,                     & ! spectral vorticity
-       & pspdiv=zspdiv,                     & ! spectral divergence
-       & pspsc3a=zspsc3a,                   & ! spectral scalars
-       & ldscders=lscders,                  &
-       & ldvorgp=.false.,                   & ! no gridpoint vorticity
-       & lddivgp=.false.,                   & ! no gridpoint divergence
-       & lduvder=luvders,                   &
-       & kvsetuv=ivset,                     &
-       & kvsetsc2=ivsetsc,                  &
-       & kvsetsc3a=ivset,                   &
-       & pgp2=zgp2,                         &
-       & pgpuv=zgpuv,                       &
-       & pgp3a=zgp3a)
+    deallocate(zreel)
 
     if( lgpnorms ) then
     write(nout,*) 'statistics gpnorm_trans all levels ...'
@@ -1151,6 +1149,25 @@ end subroutine
 
 !===================================================================================================
 
+function get_real_value(cname, iarg) result(value)
+
+  real :: value
+  character(len=*), intent(in) :: cname
+  integer, intent(inout) :: iarg
+  character(len=128) :: carg
+  integer :: stat
+
+  carg = get_str_value(cname, iarg)
+  call str2real(carg, value, stat)
+
+  if (stat /= 0) then
+    call parsing_failed("Invalid argument for " // trim(cname) // ": " // trim(carg))
+  end if
+
+end function
+
+!===================================================================================================
+
 function get_int_value(cname, iarg) result(value)
 
   integer :: value
@@ -1203,8 +1220,8 @@ end subroutine
 !===================================================================================================
 
 subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, lscders, luvders, lgpnorms, &
-  &                                   luseflt, nproma, verbosity, ldump_values, lprint_norms, &
-  &                                   lmeminfo, nprtrv, nprtrw, ncheck, ntotal, nzonal, limag)
+  &                                   luseflt, nproma, verbosity, ldump_values, lprint_norms, lwrite_errors, &
+  &                                   lmeminfo, nprtrv, nprtrw, ncheck, ntotal, nzonal, limag, rtolerance)
 
   integer, intent(inout) :: nsmax           ! Spectral truncation
   character(len=16), intent(inout) :: cgrid ! Spectral truncation
@@ -1220,6 +1237,7 @@ subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, 
   integer, intent(inout) :: verbosity       ! Level of verbosity
   logical, intent(inout) :: ldump_values    ! Dump values of grid point fields for debugging
   logical, intent(inout) :: lprint_norms    ! Calculate and print spectral norms of fields
+  logical, intent(inout) :: lwrite_errors   ! Write error files for all tested wavenumbers
   logical, intent(inout) :: lmeminfo        ! Show information from FIAT ec_meminfo routine at the
                                             ! end
   integer, intent(inout) :: nprtrv          ! Size of V set (spectral decomposition)
@@ -1229,6 +1247,7 @@ subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, 
   integer, intent(inout) :: ntotal          ! total wavenumber to be tested
   integer, intent(inout) :: nzonal          ! zonal wavenumber to be tested
   logical, intent(inout) :: limag           ! test imaginary part
+  real,    intent(inout) :: rtolerance      ! relative error tolerance for analytic solutions
 
   character(len=128) :: carg          ! Storage variable for command line arguments
   integer            :: iarg = 1      ! Argument index
@@ -1274,10 +1293,12 @@ subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, 
       case('--nproma'); nproma = get_int_value('--nproma', iarg)
       case('--dump-values'); ldump_values = .true.
       case('--norms'); lprint_norms = .true.
+      case('--errorfiles'); lwrite_errors = .true.
       case('--meminfo'); lmeminfo = .true.
       case('--nprtrv'); nprtrv = get_int_value('--nprtrv', iarg)
       case('--nprtrw'); nprtrw = get_int_value('--nprtrw', iarg)
       case('-c', '--check'); ncheck = get_int_value('-c', iarg)
+      case('--tolerance'); rtolerance = get_real_value('--tolerance', iarg)
       case default
         call parsing_failed("Unrecognised argument: " // trim(carg))
 
@@ -1311,6 +1332,17 @@ subroutine str2int(str, int, stat)
   read(str, *, iostat=stat) int
 
 end subroutine str2int
+
+!===================================================================================================
+
+subroutine str2real(str, real, stat)
+
+  character(len=*), intent(in) :: str
+  real, intent(out) :: real
+  integer, intent(out) :: stat
+  read(str, *, iostat=stat) real
+
+end subroutine str2real
 
 !===================================================================================================
 
