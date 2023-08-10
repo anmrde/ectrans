@@ -563,73 +563,99 @@ module analytic_solutions_mod
 
   !===================================================================================================
 
-  function check_lmax_all_fields(rtolerance, lwrite_errors, nzonal, ntotal, zreel, zgp2, zgp3a, zsph_analytic, znsde_analytic, zewde_analytic) result(lpassed)
+  function check_lmax_all_fields(rtolerance, lwrite_errors, nflevg, nfld, nzonal, ntotal, zreel, zgp2, zgp3a, zsph_analytic, znsde_analytic, zewde_analytic, nout) result(lreturn)
 
     implicit none
 
     real(kind=jprb), intent(in) :: rtolerance
     logical, intent(in) :: lwrite_errors
-    integer(kind=jpim), intent(in) :: nzonal, ntotal
+    integer(kind=jpim), intent(in) :: nzonal, ntotal, nflevg, nfld
     real(kind=jprb), intent(in) :: zreel(:,:,:), zgp2(:,:,:), zgp3a(:,:,:,:)
     real(kind=jprd), intent(in) :: zsph_analytic(:,:), znsde_analytic(:,:), zewde_analytic(:,:)
-    real(kind=jprd) :: lmaxrelquo, lmaxnsderelquo, lmaxewderelquo, lmaxrelfac, lmaxnsderelfac, lmaxewderelfac
-    real(kind=jprd) :: lmax_error1, lmax_nsde_error1, lmax_ewde_error1
-    real(kind=jprd) :: lmax_error2, lmax_nsde_error2, lmax_ewde_error2
-    real(kind=jprd) :: lmax_error3, lmax_nsde_error3, lmax_ewde_error3
-    logical :: lpassed
-    logical :: lpassed1, lpassed_nsde1, lpassed_ewde1
-    logical :: lpassed2, lpassed_nsde2, lpassed_ewde2
-    logical :: lpassed3, lpassed_nsde3, lpassed_ewde3
+    integer(kind=jpim) :: nout
+    real(kind=jprd) :: lmax_quo, lmax_nsde_quo, lmax_ewde_quo, lmax_fac, lmax_nsde_fac, lmax_ewde_fac
+    real(kind=jprd) :: lmax_errors(nflevg*nfld+2), lmax_errors_nsde(nflevg*nfld+2), lmax_errors_ewde(nflevg*nfld+2)
+    logical :: lpassed(nflevg*nfld+2), lpassed_nsde(nflevg*nfld+2), lpassed_ewde(nflevg*nfld+2), lreturn
+    integer :: i, j
 
-    print*,"DEBUGGING: checking errors with tolerance ", rtolerance
-    lmaxrelquo = maxval(abs( zsph_analytic(:,:)))
-    lmaxnsderelquo = maxval(abs(znsde_analytic(:,:)))
-    lmaxewderelquo = maxval(abs(zewde_analytic(:,:)))
-    lmaxrelfac = 1.0_jprd
-    lmaxnsderelfac = 1.0_jprd
-    lmaxewderelfac = 1.0_jprd
-    if(    lmaxrelquo>0.0)     lmaxrelfac = 1.0_jprd/    lmaxrelquo
-    if(lmaxnsderelquo>0.0) lmaxnsderelfac = 1.0_jprd/lmaxnsderelquo
-    if(lmaxewderelquo>0.0) lmaxewderelfac = 1.0_jprd/lmaxewderelquo
-    lmax_error1      = maxval(abs(  zreel(:,1,:)- zsph_analytic(:,:)))*lmaxrelfac
-    lmax_error2      = maxval(abs(   zgp2(:,1,:)- zsph_analytic(:,:)))*lmaxrelfac
-    lmax_error3      = maxval(abs(zgp3a(:,1,1,:)- zsph_analytic(:,:)))*lmaxrelfac
-    lmax_nsde_error1 = maxval(abs(  zreel(:,2,:)-znsde_analytic(:,:)))*lmaxnsderelfac
-    lmax_nsde_error2 = maxval(abs(   zgp2(:,2,:)-znsde_analytic(:,:)))*lmaxnsderelfac
-    lmax_nsde_error3 = maxval(abs(zgp3a(:,1,2,:)-znsde_analytic(:,:)))*lmaxnsderelfac
-    lmax_ewde_error1 = maxval(abs(  zreel(:,3,:)-zewde_analytic(:,:)))*lmaxewderelfac
-    lmax_ewde_error2 = maxval(abs(   zgp2(:,3,:)-zewde_analytic(:,:)))*lmaxewderelfac
-    lmax_ewde_error3 = maxval(abs(zgp3a(:,1,3,:)-zewde_analytic(:,:)))*lmaxewderelfac
+    lmax_quo = maxval(abs( zsph_analytic(:,:)))
+    lmax_nsde_quo = maxval(abs(znsde_analytic(:,:)))
+    lmax_ewde_quo = maxval(abs(zewde_analytic(:,:)))
+    lmax_fac = 1.0_jprd
+    lmax_nsde_fac = 1.0_jprd
+    lmax_ewde_fac = 1.0_jprd
+    if(     lmax_quo>0.0)      lmax_fac = 1.0_jprd/     lmax_quo
+    if(lmax_nsde_quo>0.0) lmax_nsde_fac = 1.0_jprd/lmax_nsde_quo
+    if(lmax_ewde_quo>0.0) lmax_ewde_fac = 1.0_jprd/lmax_ewde_quo
+    lmax_errors(1) = maxval(abs(  zreel(:,1,:)- zsph_analytic(:,:)))*lmax_fac
+    lmax_errors(2) = maxval(abs(   zgp2(:,1,:)- zsph_analytic(:,:)))*lmax_fac
+    do j=1,nflevg
+      do i=1,nfld
+        lmax_errors(i*j+2) = maxval(abs(zgp3a(:,j,i,:)- zsph_analytic(:,:)))*lmax_fac
+      end do
+    end do
+    lmax_errors_nsde(1) = maxval(abs(  zreel(:,2,:)-znsde_analytic(:,:)))*lmax_nsde_fac
+    lmax_errors_nsde(2) = maxval(abs(   zgp2(:,2,:)-znsde_analytic(:,:)))*lmax_nsde_fac
+    do j=1,nflevg
+      do i=1,nfld
+        lmax_errors_nsde(i*j+2) = maxval(abs(zgp3a(:,j,nfld+i,:)-znsde_analytic(:,:)))*lmax_nsde_fac
+      end do
+    end do
+    lmax_errors_ewde(1) = maxval(abs(  zreel(:,3,:)-zewde_analytic(:,:)))*lmax_ewde_fac
+    lmax_errors_ewde(2) = maxval(abs(   zgp2(:,3,:)-zewde_analytic(:,:)))*lmax_ewde_fac
+    do j=1,nflevg
+      do i=1,nfld
+        lmax_errors_ewde(i*j+2) = maxval(abs(zgp3a(:,j,2*nfld+i,:)-zewde_analytic(:,:)))*lmax_ewde_fac
+      end do
+    end do
     if(lwrite_errors) then
       write(33342,'(i4,i4," ┃",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3)') nzonal,ntotal, &
-      & lmax_error1, &
-      & lmax_error2, &
-      & lmax_error3, &
-      & lmax_nsde_error1, &
-      & lmax_nsde_error2, &
-      & lmax_nsde_error3, &
-      & lmax_ewde_error1, &
-      & lmax_ewde_error2, &
-      & lmax_ewde_error3
-  !   & sqrt(sum((zgp3a(:,1,3,:)-zewde_analytic(:,:))**2)/ngptot)*lmaxewderelfac
+      & lmax_errors(1), &
+      & lmax_errors(2), &
+      & lmax_errors(3), &
+      & lmax_errors_nsde(1), &
+      & lmax_errors_nsde(2), &
+      & lmax_errors_nsde(3), &
+      & lmax_errors_ewde(1), &
+      & lmax_errors_ewde(2), &
+      & lmax_errors_ewde(3)
+  !   & sqrt(sum((zgp3a(:,1,3,:)-zewde_analytic(:,:))**2)/ngptot)*lmaxewde_fac
     end if
 
-    lpassed1      = (lmax_error1      < rtolerance)
-    lpassed_nsde1 = (lmax_error2      < rtolerance)
-    lpassed_ewde1 = (lmax_error3      < rtolerance)
-    lpassed2      = (lmax_nsde_error1 < rtolerance)
-    lpassed_nsde2 = (lmax_nsde_error2 < rtolerance)
-    lpassed_ewde2 = (lmax_nsde_error3 < rtolerance)
-    lpassed3      = (lmax_ewde_error1 < rtolerance)
-    lpassed_nsde3 = (lmax_ewde_error2 < rtolerance)
-    lpassed_ewde3 = (lmax_ewde_error3 < rtolerance)
-    if((.not. lpassed1) .and. (.not. lpassed2) .and. (.not. lpassed3)) then
-    end if
-    
-    lpassed = (lpassed1 .and. lpassed_nsde1 .and. lpassed_ewde1 .and. &
-    &          lpassed2 .and. lpassed_nsde2 .and. lpassed_ewde2 .and. &
-    &          lpassed3 .and. lpassed_nsde3 .and. lpassed_ewde3)
+    do i=1,nflevg*nfld+2
+      lpassed(i) = (lmax_errors(i) < rtolerance)
+      lpassed_nsde(i) = (lmax_errors_nsde(i) < rtolerance)
+      lpassed_ewde(i) = (lmax_errors_ewde(i) < rtolerance)
+    end do
+
+    lreturn = (maxval(lmax_errors) < rtolerance) .and. (maxval(lmax_errors_nsde) < rtolerance) .and. (maxval(lmax_errors_ewde) < rtolerance)
   
+    !if(.not. lreturn) then
+    !  if(sum(abs(int(not(lpassed(1:9))))) == 9) then
+    !    print*,"Error: all tests (scalar and derivatives) fail for m=",nzonal," n=",ntotal
+    !  else if((sum(abs(int(not(lpassed(1:3))))) == 3) .and. (sum(abs(int(not(lpassed(4:9))))) == 0)) then
+    !    print*,"Error: all derivates are correct but all scalar fields zreel, zgp2 and zgp3a are wrong for m=",nzonal," n=",ntotal
+    !  else if((sum(abs(int(not(lpassed(1:3))))) == 0) .and. (sum(abs(int(not(lpassed(4:9))))) == 6)) then
+    !    print*,"Error: all scalar fields zreel, zgp2 and zgp3a are correct but all derivatives are wrong for m=",nzonal," n=",ntotal
+    !  else if((sum(abs(int(not(lpassed(1:3))))) == 0) .and. (sum(abs(int(not(lpassed(4:6))))) == 3) .and. (sum(abs(int(not(lpassed(7:9))))) == 0)) then
+    !    print*,"Error: all scalar fields and east-west derivates are correct but all north-south derivatives are wrong for m=",nzonal," n=",ntotal
+    !  else if((sum(abs(int(not(lpassed([1,4,7]))))) == 0) .and. (sum(abs(int(not(lpassed([2,3,5,6,8,9]))))) == 6)) then
+    !    print*,"Error: first invtrans is correct but all values are wrong in second invtrans call for m=",nzonal," n=",ntotal
+    !  else
+    !    if(.not. lpassed(1)) print*,"Error:   zreel(:,1,:) is wrong for m=",nzonal," n=",ntotal
+    !    if(.not. lpassed(2)) print*,"Error:    zgp2(:,1,:) is wrong for m=",nzonal," n=",ntotal
+    !    if(.not. lpassed(3)) print*,"Error: zgp3a(:,1,1,:) is wrong for m=",nzonal," n=",ntotal
+    !    if(.not. lpassed(4)) print*,"Error:   zreel(:,2,:) is wrong for m=",nzonal," n=",ntotal
+    !    if(.not. lpassed(5)) print*,"Error:    zgp2(:,2,:) is wrong for m=",nzonal," n=",ntotal
+    !    if(.not. lpassed(6)) print*,"Error: zgp3a(:,1,2,:) is wrong for m=",nzonal," n=",ntotal
+    !    if(.not. lpassed(7)) print*,"Error:   zreel(:,3,:) is wrong for m=",nzonal," n=",ntotal
+    !    if(.not. lpassed(8)) print*,"Error:    zgp2(:,3,:) is wrong for m=",nzonal," n=",ntotal
+    !    if(.not. lpassed(9)) print*,"Error: zgp3a(:,1,3,:) is wrong for m=",nzonal," n=",ntotal
+    !  end if
+    !  call flush(nout)
+    !  stop
+    !end if
+    
   end function check_lmax_all_fields
   
   !===================================================================================================

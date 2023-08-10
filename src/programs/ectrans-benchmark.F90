@@ -709,7 +709,7 @@ do jstep = 1, iters
         call compute_analytic_eastwest_derivative(nproma, ngpblks, nsmax, ngptot, nzonal, ntotal, limag, zewde_analytic)
         !if (sum((zewde_analytic(:,:))**2)>0) write(33336,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,3,:)-zewde_analytic(:,:))**2)/ngptot/sum((zewde_analytic(:,:))**2))
         call compute_analytic_northsouth_derivative(nproma, ngpblks, nsmax, ngptot, nzonal, ntotal, limag, znsde_analytic)
-        lpassed = lpassed .and. check_lmax_all_fields(rtolerance, lwrite_errors, nzonal, ntotal, zreel, zgp2, zgp3a, zsph_analytic, znsde_analytic, zewde_analytic)
+        lpassed = lpassed .and. check_lmax_all_fields(rtolerance, lwrite_errors, nflevg, nfld, nzonal, ntotal, zreel, zgp2, zgp3a, zsph_analytic, znsde_analytic, zewde_analytic, nout)
         !if (sum((znsde_analytic(:,:))**2)>0) write(33339,*)"nzonal=",nzonal," ntotal=",ntotal," rmse=",sqrt(sum((zreel(:,2,:)-znsde_analytic(:,:))**2)/ngptot/sum((znsde_analytic(:,:))**2))
         !write(33341,'("nzonal=",i0," ntotal=",i0," nsde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,2,:)),maxval(znsde_analytic(:,:))
         !write(33337,'("nzonal=",i0," ntotal=",i0," ewde=",e10.3," analytic=",e10.3)') nzonal,ntotal,maxval(zreel(:,3,:)),maxval(zewde_analytic(:,:))
