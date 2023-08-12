@@ -1,8 +1,8 @@
 module analytic_solutions_mod
 
-  use parkind1, only: jpim, jprd, jprb
+  use parkind1, only: jpim, jprd
 
-  real(kind=jprb) :: z_pi = 4.d0*datan(1.d0)
+  real(kind=jprd) :: z_pi = 4.d0*datan(1.d0)
   real(kind=jprd), allocatable :: zmu(:), legpolys(:,:,:), legpolys_ectrans(:,:,:), gelam(:,:), gelat(:,:)
   integer(kind=jpim), allocatable :: nlatidxs(:,:), nmeng(:)
   integer(kind=jpim) :: nfirstlat, nlastlat
@@ -84,24 +84,24 @@ module analytic_solutions_mod
     integer(kind=jpim) :: n, m, ilat
   
     if(allocated(legpolys)) deallocate(legpolys)
-    allocate(legpolys(nfirstlat:nlastlat, 0:nsmax, 0:nsmax))
+    allocate(legpolys(nfirstlat:nlastlat, 0:nsmax+1, 0:nsmax+1))
     legpolys = 0.0
 
-    do n = 0,nsmax
+    do n = 0,nsmax+1
       do ilat = nfirstlat, nlastlat
         x = zmu(ilat)
         legpolys(ilat, n, n) = (double_factorial(2 * n - 1) * sqrt(1. - x * x) ** n)
       end do
     end do
   
-    do n = 1,nsmax
+    do n = 1,nsmax+1
       do ilat = nfirstlat, nlastlat
         x = zmu(ilat)
         legpolys(ilat, n-1, n) = x * (2 * n - 1) * legpolys(ilat, n-1, n-1)
       end do
     end do
   
-    do n = 2,nsmax
+    do n = 2,nsmax+1
       do m = 0,n-2
         do ilat = nfirstlat, nlastlat
           x = zmu(ilat)
@@ -110,7 +110,7 @@ module analytic_solutions_mod
       end do
     end do
   
-    do n = 0,nsmax
+    do n = 0,nsmax+1
       do m = 0,n
         do ilat = nfirstlat, nlastlat
           legpolys(ilat, m, n) = K(n, m) * legpolys(ilat, m, n)
@@ -132,16 +132,16 @@ module analytic_solutions_mod
     implicit none
   
     integer(kind=jpim), intent(in) :: nsmax
-    real(kind=jprd), dimension(0:nsmax, 0:nsmax) :: zfn
+    real(kind=jprd), dimension(0:nsmax+1, 0:nsmax+1) :: zfn
     real(kind=jprd) :: zfnn
     integer(kind=jpim) :: jn, jgl, iodd
   
     if(allocated(legpolys)) deallocate(legpolys)
-    allocate(legpolys(nfirstlat:nlastlat, 0:nsmax, 0:nsmax))
+    allocate(legpolys(nfirstlat:nlastlat, 0:nsmax+1, 0:nsmax+1))
     legpolys = 0.0
 
     zfn(0,0) = 2._jprd
-    do jn = 1,nsmax
+    do jn = 1,nsmax+1
       zfnn = zfn(0,0)
       do jgl = 1,jn
         zfnn = zfnn * sqrt(1._jprd - 0.25_jprd / real(jgl**2,jprd))
@@ -154,9 +154,9 @@ module analytic_solutions_mod
       end do
     end do
   
-    call ini_pol_test(nsmax)
+    call ini_pol_test(nsmax+1)
     do jgl=nfirstlat, nlastlat
-      call supol_test(nsmax, zmu(jgl), zfn, legpolys(jgl,:,:))
+      call supol_test(nsmax+1, zmu(jgl), zfn, legpolys(jgl,:,:))
     end do
   
     call legendre_polynomials_adjust_reduced_grid(nsmax)
@@ -177,13 +177,13 @@ module analytic_solutions_mod
     integer(kind=jpim), dimension(nsmax) :: ndglu
 
     if(allocated(legpolys)) deallocate(legpolys)
-    allocate(legpolys(nfirstlat:nlastlat, 0:nsmax, 0:nsmax))
+    allocate(legpolys(nfirstlat:nlastlat, 0:nsmax+1, 0:nsmax+1))
     legpolys = 0.0
 
-    call ini_pol_test(nsmax)
+    call ini_pol_test(nsmax+1)
     do jgl=nfirstlat, nlastlat
-      do km=0,nsmax
-        call supolf_test(km, nsmax, zmu(jgl), legpolys(jgl,km,:))
+      do km=0,nsmax+1
+        call supolf_test(km, nsmax+1, zmu(jgl), legpolys(jgl,km,:))
       end do
     end do
   
@@ -199,6 +199,7 @@ module analytic_solutions_mod
   
     use supolf_test_mod, only: supolf_test
     use tpm_pol_test, only: ini_pol_test, dfa
+    use parkind1, only: jprb
   
     implicit none
   
@@ -509,7 +510,7 @@ module analytic_solutions_mod
       ioff = jkglo - 1
       ibl  = (jkglo-1)/nproma+1
       do jrof=1,iend
-        if(ktotal<nsmax) then
+        if(ktotal<nsmax+1) then
           legpolyp1 = legpolys(nlatidxs(jrof,ibl), kzonal, ktotal+1)
         end if
         if(ktotal>0) then
@@ -563,101 +564,196 @@ module analytic_solutions_mod
 
   !===================================================================================================
 
-  function check_lmax_all_fields(rtolerance, lwrite_errors, nflevg, nfld, nzonal, ntotal, zreel, zgp2, zgp3a, zsph_analytic, znsde_analytic, zewde_analytic, nout) result(lreturn)
+  subroutine init_check_fields(lwrite_errors)
 
     implicit none
 
-    real(kind=jprb), intent(in) :: rtolerance
     logical, intent(in) :: lwrite_errors
-    integer(kind=jpim), intent(in) :: nzonal, ntotal, nflevg, nfld
-    real(kind=jprb), intent(in) :: zreel(:,:,:), zgp2(:,:,:), zgp3a(:,:,:,:)
+
+    if(lwrite_errors) then
+      write(33342,'("lmax-error in grid point space")')
+      write(33342,'("             ┃           grid point data        │      north-south derivative      │       east-west derivative ")')
+      write(33342,'("   m   n it. ┃        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a ")')
+      write(33342,'("━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
+      write(33344,'("lmax-error in spectral space")')
+      write(33344,'("   m   n it. ┃     zspsc2    zspsc2b       zspsc3a ")')
+      write(33344,'("━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
+      call flush(33342)
+      call flush(33344)
+    end if
+    
+  end subroutine init_check_fields
+
+  !===================================================================================================
+
+  function check_gp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, zreel, zgp2, zgp3a, zsph_analytic, znsde_analytic, zewde_analytic, nout) result(lpassed_all)
+
+    use parkind1, only: jprb
+
+    implicit none
+
+    real(kind=jprd), intent(in) :: rtolerance ! jprb would be enough
+    logical, intent(in) :: lwrite_errors
+    integer(kind=jpim), intent(in) :: jstep, nzonal, ntotal, nflevg, nfld
+    real(kind=jprd), intent(in) :: zreel(:,:,:), zgp2(:,:,:), zgp3a(:,:,:,:) ! should be jprb
     real(kind=jprd), intent(in) :: zsph_analytic(:,:), znsde_analytic(:,:), zewde_analytic(:,:)
     integer(kind=jpim) :: nout
-    real(kind=jprd) :: lmax_quo, lmax_nsde_quo, lmax_ewde_quo, lmax_fac, lmax_nsde_fac, lmax_ewde_fac
-    real(kind=jprd) :: lmax_errors(nflevg*nfld+2), lmax_errors_nsde(nflevg*nfld+2), lmax_errors_ewde(nflevg*nfld+2)
-    logical :: lpassed(nflevg*nfld+2), lpassed_nsde(nflevg*nfld+2), lpassed_ewde(nflevg*nfld+2), lreturn
-    integer :: i, j
+    real(kind=jprd) :: rlmax_quo, rlmax_nsde_quo, rlmax_ewde_quo, rlmax_fac, rlmax_nsde_fac, rlmax_ewde_fac
+    real(kind=jprd) :: rlmax_errors(nflevg*nfld+2), rlmax_errors_nsde(nflevg*nfld+2), rlmax_errors_ewde(nflevg*nfld+2)
+    logical :: lpassed(nflevg*nfld+2), lpassed_nsde(nflevg*nfld+2), lpassed_ewde(nflevg*nfld+2), lpassed_all
+    integer :: i, j, ntests
 
-    lmax_quo = maxval(abs( zsph_analytic(:,:)))
-    lmax_nsde_quo = maxval(abs(znsde_analytic(:,:)))
-    lmax_ewde_quo = maxval(abs(zewde_analytic(:,:)))
-    lmax_fac = 1.0_jprd
-    lmax_nsde_fac = 1.0_jprd
-    lmax_ewde_fac = 1.0_jprd
-    if(     lmax_quo>0.0)      lmax_fac = 1.0_jprd/     lmax_quo
-    if(lmax_nsde_quo>0.0) lmax_nsde_fac = 1.0_jprd/lmax_nsde_quo
-    if(lmax_ewde_quo>0.0) lmax_ewde_fac = 1.0_jprd/lmax_ewde_quo
-    lmax_errors(1) = maxval(abs(  zreel(:,1,:)- zsph_analytic(:,:)))*lmax_fac
-    lmax_errors(2) = maxval(abs(   zgp2(:,1,:)- zsph_analytic(:,:)))*lmax_fac
+    ntests = nflevg*nfld+2
+    rlmax_quo = maxval(abs( zsph_analytic(:,:)))
+    rlmax_nsde_quo = maxval(abs(znsde_analytic(:,:)))
+    rlmax_ewde_quo = maxval(abs(zewde_analytic(:,:)))
+    rlmax_fac = 1.0_jprd
+    rlmax_nsde_fac = 1.0_jprd
+    rlmax_ewde_fac = 1.0_jprd
+    !if(     rlmax_quo>0.0)      rlmax_fac = 1.0_jprd/     rlmax_quo
+    !if(rlmax_nsde_quo>0.0) rlmax_nsde_fac = 1.0_jprd/rlmax_nsde_quo
+    !if(rlmax_ewde_quo>0.0) rlmax_ewde_fac = 1.0_jprd/rlmax_ewde_quo
+    rlmax_errors(1) = maxval(abs(zreel(:,1,:)- zsph_analytic(:,:)))*rlmax_fac
+    rlmax_errors(2) = maxval(abs( zgp2(:,1,:)- zsph_analytic(:,:)))*rlmax_fac
     do j=1,nflevg
       do i=1,nfld
-        lmax_errors(i*j+2) = maxval(abs(zgp3a(:,j,i,:)- zsph_analytic(:,:)))*lmax_fac
+        rlmax_errors(i*j+2) = maxval(abs(zgp3a(:,j,i,:)- zsph_analytic(:,:)))*rlmax_fac
       end do
     end do
-    lmax_errors_nsde(1) = maxval(abs(  zreel(:,2,:)-znsde_analytic(:,:)))*lmax_nsde_fac
-    lmax_errors_nsde(2) = maxval(abs(   zgp2(:,2,:)-znsde_analytic(:,:)))*lmax_nsde_fac
+    rlmax_errors_nsde(1) = maxval(abs(zreel(:,2,:)-znsde_analytic(:,:)))*rlmax_nsde_fac
+    rlmax_errors_nsde(2) = maxval(abs( zgp2(:,2,:)-znsde_analytic(:,:)))*rlmax_nsde_fac
     do j=1,nflevg
       do i=1,nfld
-        lmax_errors_nsde(i*j+2) = maxval(abs(zgp3a(:,j,nfld+i,:)-znsde_analytic(:,:)))*lmax_nsde_fac
+        rlmax_errors_nsde(i*j+2) = maxval(abs(zgp3a(:,j,nfld+i,:)-znsde_analytic(:,:)))*rlmax_nsde_fac
       end do
     end do
-    lmax_errors_ewde(1) = maxval(abs(  zreel(:,3,:)-zewde_analytic(:,:)))*lmax_ewde_fac
-    lmax_errors_ewde(2) = maxval(abs(   zgp2(:,3,:)-zewde_analytic(:,:)))*lmax_ewde_fac
+    rlmax_errors_ewde(1) = maxval(abs(zreel(:,3,:)-zewde_analytic(:,:)))*rlmax_ewde_fac
+    rlmax_errors_ewde(2) = maxval(abs( zgp2(:,3,:)-zewde_analytic(:,:)))*rlmax_ewde_fac
     do j=1,nflevg
       do i=1,nfld
-        lmax_errors_ewde(i*j+2) = maxval(abs(zgp3a(:,j,2*nfld+i,:)-zewde_analytic(:,:)))*lmax_ewde_fac
+        rlmax_errors_ewde(i*j+2) = maxval(abs(zgp3a(:,j,2*nfld+i,:)-zewde_analytic(:,:)))*rlmax_ewde_fac
       end do
     end do
     if(lwrite_errors) then
-      write(33342,'(i4,i4," ┃",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3)') nzonal,ntotal, &
-      & lmax_errors(1), &
-      & lmax_errors(2), &
-      & lmax_errors(3), &
-      & lmax_errors_nsde(1), &
-      & lmax_errors_nsde(2), &
-      & lmax_errors_nsde(3), &
-      & lmax_errors_ewde(1), &
-      & lmax_errors_ewde(2), &
-      & lmax_errors_ewde(3)
+      write(33342,'(i4,i4,i4," ┃",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3)') nzonal,ntotal,jstep, &
+      & rlmax_errors(1), &
+      & rlmax_errors(2), &
+      & rlmax_errors(3), &
+      & rlmax_errors_nsde(1), &
+      & rlmax_errors_nsde(2), &
+      & rlmax_errors_nsde(3), &
+      & rlmax_errors_ewde(1), &
+      & rlmax_errors_ewde(2), &
+      & rlmax_errors_ewde(3)
   !   & sqrt(sum((zgp3a(:,1,3,:)-zewde_analytic(:,:))**2)/ngptot)*lmaxewde_fac
+      call flush(33342)
     end if
 
-    do i=1,nflevg*nfld+2
-      lpassed(i) = (lmax_errors(i) < rtolerance)
-      lpassed_nsde(i) = (lmax_errors_nsde(i) < rtolerance)
-      lpassed_ewde(i) = (lmax_errors_ewde(i) < rtolerance)
+    do i=1,ntests
+      lpassed(i) = (rlmax_errors(i) < rtolerance)
+      lpassed_nsde(i) = (rlmax_errors_nsde(i) < rtolerance)
+      lpassed_ewde(i) = (rlmax_errors_ewde(i) < rtolerance)
     end do
 
-    lreturn = (maxval(lmax_errors) < rtolerance) .and. (maxval(lmax_errors_nsde) < rtolerance) .and. (maxval(lmax_errors_ewde) < rtolerance)
+    lpassed_all = (maxval(rlmax_errors) < rtolerance) .and. (maxval(rlmax_errors_nsde) < rtolerance) .and. (maxval(rlmax_errors_ewde) < rtolerance)
   
-    !if(.not. lreturn) then
-    !  if(sum(abs(int(not(lpassed(1:9))))) == 9) then
-    !    print*,"Error: all tests (scalar and derivatives) fail for m=",nzonal," n=",ntotal
-    !  else if((sum(abs(int(not(lpassed(1:3))))) == 3) .and. (sum(abs(int(not(lpassed(4:9))))) == 0)) then
-    !    print*,"Error: all derivates are correct but all scalar fields zreel, zgp2 and zgp3a are wrong for m=",nzonal," n=",ntotal
-    !  else if((sum(abs(int(not(lpassed(1:3))))) == 0) .and. (sum(abs(int(not(lpassed(4:9))))) == 6)) then
-    !    print*,"Error: all scalar fields zreel, zgp2 and zgp3a are correct but all derivatives are wrong for m=",nzonal," n=",ntotal
-    !  else if((sum(abs(int(not(lpassed(1:3))))) == 0) .and. (sum(abs(int(not(lpassed(4:6))))) == 3) .and. (sum(abs(int(not(lpassed(7:9))))) == 0)) then
-    !    print*,"Error: all scalar fields and east-west derivates are correct but all north-south derivatives are wrong for m=",nzonal," n=",ntotal
-    !  else if((sum(abs(int(not(lpassed([1,4,7]))))) == 0) .and. (sum(abs(int(not(lpassed([2,3,5,6,8,9]))))) == 6)) then
-    !    print*,"Error: first invtrans is correct but all values are wrong in second invtrans call for m=",nzonal," n=",ntotal
-    !  else
-    !    if(.not. lpassed(1)) print*,"Error:   zreel(:,1,:) is wrong for m=",nzonal," n=",ntotal
-    !    if(.not. lpassed(2)) print*,"Error:    zgp2(:,1,:) is wrong for m=",nzonal," n=",ntotal
-    !    if(.not. lpassed(3)) print*,"Error: zgp3a(:,1,1,:) is wrong for m=",nzonal," n=",ntotal
-    !    if(.not. lpassed(4)) print*,"Error:   zreel(:,2,:) is wrong for m=",nzonal," n=",ntotal
-    !    if(.not. lpassed(5)) print*,"Error:    zgp2(:,2,:) is wrong for m=",nzonal," n=",ntotal
-    !    if(.not. lpassed(6)) print*,"Error: zgp3a(:,1,2,:) is wrong for m=",nzonal," n=",ntotal
-    !    if(.not. lpassed(7)) print*,"Error:   zreel(:,3,:) is wrong for m=",nzonal," n=",ntotal
-    !    if(.not. lpassed(8)) print*,"Error:    zgp2(:,3,:) is wrong for m=",nzonal," n=",ntotal
-    !    if(.not. lpassed(9)) print*,"Error: zgp3a(:,1,3,:) is wrong for m=",nzonal," n=",ntotal
-    !  end if
-    !  call flush(nout)
-    !  stop
-    !end if
+    if(.not. lpassed_all) then
+      if(lwrite_errors) then
+        write(33343,'("m=",i4," n=",i4," jstep=",i4)')nzonal,ntotal,jstep
+        write(33343,'("                     ┃                                                        │                 north-south derivatives                │                 east-west derivatives                ")')
+        write(33343,'("     lat/°     lon/° ┃ analytical        pgp       pgp2      pgp3a  max-error │ analytical        pgp       pgp2      pgp3a  max-error │ analytical        pgp       pgp2      pgp3a  max-error ")')
+        write(33343,'("━━━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
+        do j=1,ubound(gelat,2)
+          do i=1,ubound(gelat,1)
+            if(max(abs(zreel(i,1,j)-zsph_analytic(i,j))*rlmax_fac,abs(zgp2(i,1,j)-zsph_analytic(i,j) )*rlmax_fac, &
+              & maxval(abs((zgp3a(i,:,1,j)-zsph_analytic(i,j) )))*rlmax_fac, abs(zreel(i,2,j)-znsde_analytic(i,j))*rlmax_nsde_fac, &
+              & abs(zgp2(i,2,j)-znsde_analytic(i,j))*rlmax_nsde_fac, maxval(abs((zgp3a(i,:,2,j)-znsde_analytic(i,j))))*rlmax_nsde_fac, &
+              & abs(zreel(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, abs(zgp2(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, &
+              & maxval(abs((zgp3a(i,:,3,j)-zewde_analytic(i,j))))*rlmax_ewde_fac) > rtolerance) then
+              write(33343,'(f10.3,f10.3," ┃",e11.3,e11.3,e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3,e11.3,e11.3)') &
+                & gelat(i,  j)*180/z_pi,gelam(i,j)*180/z_pi, &
+                & abs(zsph_analytic(i,j)), abs(zreel(i,1,j)), abs(zgp2(i,1,j)), maxval(abs(zgp3a(i,:,1,j))), &
+                & max(         (zreel(i,  1,j)-zsph_analytic(i,j) )*rlmax_fac, &
+                &               (zgp2(i,  1,j)-zsph_analytic(i,j) )*rlmax_fac, &
+                &   maxval(abs((zgp3a(i,:,1,j)-zsph_analytic(i,j) )))*rlmax_fac)     , &
+                & znsde_analytic(i,j), zreel(i,2,j), zgp2(i,2,j), maxval(abs(zgp3a(i,:,2,j))), &
+                & max(           (zreel(i,2,j)-znsde_analytic(i,j))*rlmax_nsde_fac, &
+                &                 (zgp2(i,2,j)-znsde_analytic(i,j))*rlmax_nsde_fac, &
+                &   maxval(abs((zgp3a(i,:,2,j)-znsde_analytic(i,j))))*rlmax_nsde_fac), &
+                & zewde_analytic(i,j), zreel(i,3,j), zgp2(i,3,j), maxval(abs(zgp3a(i,:,3,j))), &
+                & max(           (zreel(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, &
+                &                 (zgp2(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, &
+                &   maxval(abs((zgp3a(i,:,3,j)-zewde_analytic(i,j))))*rlmax_ewde_fac)
+            end if
+          end do
+        end do
+      end if
+      if(sum(abs(int(not(lpassed))))+sum(abs(int(not(lpassed_nsde))))+sum(abs(int(not(lpassed_ewde)))) == 3*ntests) then
+        write(nout,'("Error: all tests (fields and derivatives) fail for m=",i4," n=",i4)')nzonal,ntotal
+      else if((sum(abs(int(not(lpassed)))) == ntests) .and. (sum(abs(int(not(lpassed_nsde))))+sum(abs(int(not(lpassed_ewde)))) == 0)) then
+        write(nout,'("Error: all derivates are correct but all fields zreel, zgp2 and zgp3a are wrong for m=",i4," n=",i4)')nzonal,ntotal
+      else if((sum(abs(int(not(lpassed)))) == 0) .and. (sum(abs(int(not(lpassed_nsde))))+sum(abs(int(not(lpassed_ewde)))) == 2*ntests)) then
+        write(nout,'("Error: all fields zreel, zgp2 and zgp3a are correct but all derivatives are wrong for m=",i4," n=",i4)')nzonal,ntotal
+      else if((sum(abs(int(not(lpassed)))) == 0) .and. (sum(abs(int(not(lpassed_nsde)))) == ntests) .and. (sum(abs(int(not(lpassed_ewde)))) == 0)) then
+        write(nout,'("Error: all fields and east-west derivates are correct but all north-south derivatives are wrong for m=",i4," n=",i4)')nzonal,ntotal
+      else if(lpassed(1) .and. lpassed_nsde(1) .and. lpassed_ewde(1) .and. (sum(abs(int(not(lpassed(2:)))))+sum(abs(int(not(lpassed_nsde(2:)))))+sum(abs(int(not(lpassed_ewde(2:))))) == 3*(ntests-1))) then
+        write(nout,'("Error: first invtrans is correct but all values are wrong in second invtrans call for m=",i4," n=",i4)')nzonal,ntotal
+      else
+        if(sum(abs(int(not(lpassed))))>0) write(nout,'("Error: "i3," fields are wrong for m=",i4," n=",i4)')sum(abs(int(not(lpassed)))),nzonal,ntotal
+        if(sum(abs(int(not(lpassed_nsde))))>0) write(nout,'("Error: "i3," north-south derivatives are wrong for m=",i4," n=",i4)')sum(abs(int(not(lpassed_nsde)))),nzonal,ntotal
+        if(sum(abs(int(not(lpassed_ewde))))>0) write(nout,'("Error: "i3," east-west are wrong for m=",i4," n=",i4)')sum(abs(int(not(lpassed_ewde)))),nzonal,ntotal
+      end if
+      call flush(nout)
+      stop
+    end if
     
-  end function check_lmax_all_fields
+  end function check_gp_fields
   
+  !===================================================================================================
+
+  function check_sp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, nindex, zspsc2, zspsc2b, zspsc3a, nout) result(lpassed_all)
+
+    use parkind1, only: jprb
+
+    implicit none
+
+    real(kind=jprd), intent(in) :: rtolerance ! jprb would be enough
+    logical, intent(in) :: lwrite_errors
+    integer(kind=jpim), intent(in) :: jstep, nzonal, ntotal, nflevg, nfld, nindex
+    real(kind=jprd), intent(in) :: zspsc2(:,:), zspsc2b(:,:), zspsc3a(:,:,:) ! should be kind jprb
+    real(kind=jprd) :: rlmax_error_zspsc2, rlmax_error_zspsc2b, rlmax_error_zspsc3a
+    integer(kind=jpim) :: nout
+    logical :: lpassed_zspsc2, lpassed_zspsc2b, lpassed_zspsc3a, lpassed_all
+
+    if(nindex > 0) then
+      rlmax_error_zspsc2  = max(maxval(abs( zspsc2(:,1:nindex-1  ))),maxval(abs( zspsc2(:,nindex)  -1.0_jprd)),maxval(abs( zspsc2(:,nindex+1:  ))))
+      rlmax_error_zspsc2b = max(maxval(abs(zspsc2b(:,1:nindex-1  ))),maxval(abs(zspsc2b(:,nindex)  -1.0_jprd)),maxval(abs(zspsc2b(:,nindex+1:  ))))
+      rlmax_error_zspsc3a = max(maxval(abs(zspsc3a(:,1:nindex-1,:))),maxval(abs(zspsc3a(:,nindex,:)-1.0_jprd)),maxval(abs(zspsc3a(:,nindex+1:,:))))
+    else
+      rlmax_error_zspsc2  = maxval(abs( zspsc2(:,:  )))
+      rlmax_error_zspsc2b = maxval(abs(zspsc2b(:,:  )))
+      rlmax_error_zspsc3a = maxval(abs(zspsc3a(:,:,:)))
+    end if
+
+    lpassed_zspsc2  = (rlmax_error_zspsc2  < rtolerance)
+    lpassed_zspsc2b = (rlmax_error_zspsc2b < rtolerance)
+    lpassed_zspsc3a = (rlmax_error_zspsc3a < rtolerance)
+    lpassed_all = lpassed_zspsc2 .and. lpassed_zspsc2b .and. lpassed_zspsc3a
+    if(lwrite_errors) then
+      write(33344,'(i4,i4,i4," ┃",e11.3,e11.3,e11.3)') nzonal,ntotal,jstep, &
+      & rlmax_error_zspsc2,  &
+      & rlmax_error_zspsc2b, &
+      & rlmax_error_zspsc3a
+      call flush(33344)
+    end if
+    if(.not. lpassed_all) then
+      if((.not. lpassed_zspsc2) .and. (.not. lpassed_zspsc2b) .and. (.not. lpassed_zspsc3a)) write(nout,'("Error: all spectral fields are wrong for m=",i4," n=",i4)')nzonal,ntotal
+      write(nout,'("there must be something wrong in the direct transform")')
+      call flush(nout)
+      stop
+    end if
+  end function check_sp_fields
+
   !===================================================================================================
   
 end module analytic_solutions_mod

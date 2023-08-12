@@ -16,13 +16,13 @@ if( HAVE_TOOLS )
 
   ecbuild_warn_var( ECTRANS_TOOLS_RTABLE_PATH )
 
-  file( GLOB ectrans_programs ectrans-benchmark.F90 )
+  file( GLOB ectrans_programs *.F90 )
   foreach( _program IN ITEMS ${ectrans_programs} )
     get_filename_component( _program ${_program} NAME_WE )
 
     ecbuild_add_executable(TARGET ${_program}
-      SOURCES ${_program}.F90 analytic_solutions_mod.F90
-      LIBS ${trans} ectrans_init_spherical_harmonic
+      SOURCES ${_program}.F90
+      LIBS ${trans}
       LINKER_LANGUAGE Fortran
       DEFINITIONS ECTRANS_TOOLS_RTABLE_PATH="${ECTRANS_TOOLS_RTABLE_PATH}" )
 
@@ -36,56 +36,44 @@ ecbuild_list_add_pattern( LIST analytic_test_files
                           QUIET
                         )
 
-foreach( prec sp )
-  if( HAVE_${prec} )
-    ecbuild_add_executable(TARGET  ectrans-benchmark-${prec}
-                          SOURCES ectrans-benchmark.F90 ${analytic_test_files}
-                          LIBS
-                            fiat
-                            parkind_${prec}
-                            trans_${prec}
-                            ectrans_init_spherical_harmonic
-                          )
+foreach( program ectrans-benchmark ectrans-benchmark-ifs ectrans-analytic )
 
-    if( HAVE_GPU )
-      foreach( gpumethod acc )
-        if( HAVE_${gpumethod} )
-          if( gpumethod STREQUAL acc )
-            ecbuild_add_executable(TARGET  ectrans-benchmark-gpu-${prec}-${gpumethod}
-                                  SOURCES ectrans-benchmark.F90 ${analytic_test_files}
-                                  LINKER_LANGUAGE Fortran
-                                  LIBS
-                                    fiat
-                                    parkind_${prec}
-                                    trans_gpu_${prec}_${gpumethod}
-                                    ectrans_init_spherical_harmonic
-                                    OpenACC::OpenACC_Fortran
-                                  )
-            target_compile_definitions( ectrans-benchmark-gpu-${prec}-${gpumethod} PRIVATE ACCGPU )
-          endif()
-
-          if( gpumethod STREQUAL omp )
-            ecbuild_add_executable(TARGET  ectrans-benchmark-gpu-${prec}-${gpumethod}
-                                  SOURCES ectrans-benchmark.F90 ${analytic_test_files}
-                                  LINKER_LANGUAGE Fortran
-                                  LIBS
-                                    fiat
-                                    parkind_${prec}
-                                    trans_gpu_${prec}_${gpumethod}
-                                    ectrans_init_spherical_harmonic
-                                  )
-            target_compile_definitions( ectrans-benchmark-gpu-${prec}-${gpumethod} PRIVATE OMPGPU )
-          endif()
-                    
-          target_link_options   ( ectrans-benchmark-gpu-${prec}-${gpumethod} INTERFACE "$<$<LINK_LANG_AND_ID:Fortran,NVHPC>:${${gpumethod}_link_flags}>" )
-          target_compile_options( ectrans-benchmark-gpu-${prec}-${gpumethod} PUBLIC $<$<COMPILE_LANGUAGE:Fortran>:${${gpumethod}_flags}>)
-
-        endif()
-      endforeach()
-    endif()
+  if ( HAVE_CPU )
+    foreach( prec dp sp )
+      if( HAVE_${prec} )
+        ecbuild_add_executable( TARGET  ${program}-${prec}
+                                SOURCES ${program}.F90 ${analytic_test_files}
+                                LINKER_LANGUAGE Fortran
+                                LIBS
+                                  fiat
+                                  parkind_${prec}
+                                  trans_${prec}
+        )
+        if( prec STREQUAL sp )
+          target_compile_definitions( ${program}-${prec} PRIVATE TRANS_SINGLE )
+        endif()                    
+      endif()
+    endforeach( prec)
   endif()
-endforeach()
 
+  if( HAVE_GPU )
+    foreach( prec dp sp )
+      if( HAVE_${prec} )
+            ecbuild_add_executable( TARGET  ${program}-gpu-${prec}
+                                    SOURCES ${program}.F90 ${analytic_test_files}
+                                    LINKER_LANGUAGE Fortran
+                                    LIBS
+                                      fiat
+                                      parkind_${prec}
+                                      trans_gpu_${prec}
+            )
+            if( prec STREQUAL sp )
+              target_compile_definitions( ${program}-gpu-${prec} PRIVATE TRANS_SINGLE )
+            endif()                    
+      endif()
+ endforeach( prec )
+  endif( HAVE_GPU )
+endforeach( program )
 
 # ectrans information tool
 

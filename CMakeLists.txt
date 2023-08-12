@@ -32,7 +32,7 @@ ecbuild_add_option( FEATURE OMP
                     REQUIRED_PACKAGES "OpenMP COMPONENTS Fortran" )
 
 ecbuild_add_option( FEATURE DOUBLE_PRECISION
-                    DEFAULT OFF
+                    DEFAULT ON
                     DESCRIPTION "Support for Double Precision" )
 
 ecbuild_add_option( FEATURE SINGLE_PRECISION
@@ -58,6 +58,11 @@ ecbuild_add_option( FEATURE FFTW
                     DEFAULT ON
                     DESCRIPTION "Support for fftw"
                     REQUIRED_PACKAGES "FFTW COMPONENTS double ${single}" )
+
+ecbuild_add_option( FEATURE CPU
+                    DEFAULT ON
+                    DESCRIPTION "Compile CPU version of ectrans"
+                   )
 
 ecbuild_add_option( FEATURE TRANSI
                     DEFAULT ON

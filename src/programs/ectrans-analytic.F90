@@ -45,6 +45,11 @@ use oml_mod ,only : oml_max_threads
 use mpl_module
 use yomgstats, only: jpmaxstat
 use yomhook, only : dr_hook_init
+use analytic_solutions_mod, only: analytic_init, analytic_end, buffer_legendre_polynomials, &
+& buffer_legendre_polynomials_belusov, buffer_legendre_polynomials_supolf, &
+& buffer_legendre_polynomials_ectrans, check_legendre_polynomials, &
+& compute_analytic_solution, compute_analytic_eastwest_derivative, &
+& compute_analytic_northsouth_derivative, gelam, gelat, init_check_fields, check_gp_fields, check_sp_fields
 
 implicit none
 
@@ -65,7 +70,9 @@ integer(kind=jpim) :: nsmax   = 79  ! Spectral truncation
 integer(kind=jpim) :: iters   = 10  ! Number of iterations for transform test
 integer(kind=jpim) :: nfld    = 1   ! Number of scalar fields 
 integer(kind=jpim) :: nlev    = 1   ! Number of vertical levels
-
+integer(kind=jpim) :: nzonal  = 0   ! zonal wavenumber to be tested
+integer(kind=jpim) :: ntotal  = 1   ! total wavenumber to be tested
+logical            :: limag = .false. ! test imaginary part of spectral data
 integer(kind=jpim) :: nflevg
 integer(kind=jpim) :: ndgl ! Number of latitudes
 integer(kind=jpim) :: nspec2
@@ -79,9 +86,11 @@ integer(kind=jpim) :: i
 integer(kind=jpim) :: ja
 integer(kind=jpim) :: ib
 integer(kind=jpim) :: jprtrv
+integer(kind=jpim) :: n_regions_ns
+integer(kind=jpim) :: n_regions_ew
 
-integer(kind=jpim), allocatable :: nloen(:), nprcids(:)
-integer(kind=jpim) :: myproc, jj
+integer(kind=jpim), allocatable :: nloen(:), nprcids(:), nlatidxs(:,:)
+integer(kind=jpim) :: myproc, jj, jf, ilf, igp
 integer :: jstep
 
 real(kind=jprd) :: ztinit, ztloop, timef, ztstepmax, ztstepmin, ztstepavg, ztstepmed
@@ -105,11 +114,18 @@ real(kind=jprb), allocatable, target :: sp3d(:,:,:)
 real(kind=jprb), pointer :: zspvor(:,:) => null()
 real(kind=jprb), pointer :: zspdiv(:,:) => null()
 real(kind=jprb), pointer :: zspsc3a(:,:,:) => null()
-real(kind=jprb), allocatable :: zspsc2(:,:)
+real(kind=jprb), allocatable :: zspsc2(:,:), zspsc2b(:,:)
+real(kind=jprb), allocatable :: zave(:),zmin(:),zmax(:),zreel(:,:,:)
+real(kind=jprd), allocatable :: zsph_analytic(:,:)
+real(kind=jprd), allocatable :: zewde_analytic(:,:)
+real(kind=jprd), allocatable :: znsde_analytic(:,:)
+real(kind=jprd), allocatable :: zsinlats(:)
+real(kind=jprd), allocatable :: zlegpolys(:,:,:)
+real(kind=jprd), allocatable :: zlegpolys2(:,:,:)
 
 logical :: lstack = .false. ! Output stack info
-logical :: luserpnm = .false.
-logical :: lkeeprpnm = .false.
+logical :: luserpnm = .true.
+logical :: lkeeprpnm = .true.
 logical :: luseflt = .false. ! Use fast legendre transforms
 logical :: ltrace_stats = .false.
 logical :: lstats_omp = .false.
@@ -129,8 +145,16 @@ logical :: lvordiv = .false.
 logical :: lscders = .false.
 logical :: luvders = .false.
 logical :: lprint_norms = .false. ! Calculate and print spectral norms
+logical :: lwrite_errors = .true. ! Write error files for all tested wavenumbers
 logical :: lmeminfo = .false. ! Show information from FIAT routine ec_meminfo at the end
-
+logical :: lgpnorms = .false. ! print gpnorms
+#ifdef TRANS_SINGLE
+  ! the following type could be jprb
+  real(kind=jprd) :: rtolerance = 1e-4  ! maximum relative lmax error tolerance for passing analytyic solution tests
+#else
+  ! the following type could be jprb
+  real(kind=jprd) :: rtolerance = 1e-10 ! maximum relative lmax error tolerance for passing analytyic solution tests
+#endif
 integer(kind=jpim) :: nstats_mem = 0
 integer(kind=jpim) :: ntrace_stats = 0
 integer(kind=jpim) :: nprnt_stats = 1
@@ -145,6 +169,7 @@ logical :: lmpoff = .false. ! Message passing switch
 integer :: verbosity = 0
 
 real(kind=jprb) :: zra = 6371229._jprb
+real(kind=jprb) :: z_pi = 4.d0*datan(1.d0)
 
 integer(kind=jpim) :: nmax_resol = 37 ! Max number of resolutions
 integer(kind=jpim) :: npromatr = 0 ! nproma for trans lib
@@ -161,11 +186,13 @@ integer(kind=jpim) :: mysetv
 integer(kind=jpim) :: mysetw
 integer(kind=jpim) :: mp_type = 2 ! Message passing type
 integer(kind=jpim) :: mbx_size = 150000000 ! Mailbox size
+integer(kind=jpim) :: nindex
 
 integer(kind=jpim), allocatable :: numll(:), ivset(:)
 integer(kind=jpim) :: ivsetsc(1)
 
 integer(kind=jpim) :: nflevl
+integer(kind=jpim) :: nlats
 
 ! sumpini
 integer(kind=jpim) :: isqr
@@ -178,7 +205,7 @@ integer(kind=jpim) :: ngpblks
 ! locals
 integer(kind=jpim) :: iprtrv
 integer(kind=jpim) :: iprtrw
-integer(kind=jpim) :: iprused, ilevpp, irest, ilev, jlev
+integer(kind=jpim) :: iprused, ilevpp, irest, ilev, jlev, iprev
 
 integer(kind=jpim) :: ndimgmv  = 0 ! Third dim. of gmv "(nproma,nflevg,ndimgmv,ngpblks)"
 integer(kind=jpim) :: ndimgmvs = 0 ! Second dim. gmvs "(nproma,ndimgmvs,ngpblks)"
@@ -195,6 +222,7 @@ integer(kind=jpim) :: jbegin_uder_EW = 0
 integer(kind=jpim) :: jend_uder_EW = 0
 integer(kind=jpim) :: jbegin_vder_EW = 0
 integer(kind=jpim) :: jend_vder_EW = 0
+logical :: lpassed = .true.
 
 logical :: ldump_values = .false.
 
@@ -211,6 +239,8 @@ character(len=16) :: cgrid = ''
 #include "dir_trans.h"
 #include "trans_inq.h"
 #include "specnorm.h"
+#include "gpnorm_trans.h"
+#include "gpnorm_trans_cpu.h"
 #include "abor1.intfb.h"
 #include "gstats_setup.intfb.h"
 #include "ec_meminfo.intfb.h"
@@ -220,8 +250,8 @@ character(len=16) :: cgrid = ''
 luse_mpi = detect_mpirun()
 
 ! Setup
-call get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, lscders, luvders, &
-  & luseflt, nproma, verbosity, ldump_values, lprint_norms, lmeminfo, nprtrv, nprtrw, ncheck)
+call get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, lscders, luvders, lgpnorms, &
+  & luseflt, nproma, verbosity, ldump_values, lprint_norms, lwrite_errors, lmeminfo, nprtrv, nprtrw, ncheck, ntotal, nzonal, limag, rtolerance)
 if (cgrid == '') cgrid = cubic_octahedral_gaussian_grid(nsmax)
 call parse_grid(cgrid, ndgl, nloen)
 nflevg = nlev
@@ -393,17 +423,15 @@ call gstats(1, 0)
 call setup_trans0(kout=nout, kerr=nerr, kprintlev=merge(2, 0, verbosity == 1),                &
   &               kmax_resol=nmax_resol, kpromatr=npromatr, kprgpns=nprgpns, kprgpew=nprgpew, &
   &               kprtrw=nprtrw, kcombflen=ncombflen, ldsync_trans=lsync_trans,               &
-  &               ldeq_regions=leq_regions, prad=zra, ldalloperm=.true., ldmpoff=.not.luse_mpi)
+  &               ldeq_regions=leq_regions, prad=zra, ldalloperm=.true.,                      &
+  &               ldmpoff=.not.luse_mpi, k_regions_ns=n_regions_ns, k_regions_ew=n_regions_ew)
 call gstats(1, 1)
 
 call gstats(2, 0)
 ! IFS spectral fields are dimensioned NFLEVL, Nils !!
-call set_ectrans_gpu_nflev(nflevl)
-  ! We pass nflevl via environment variable in order not to change API
-  ! In long run, ectrans should grow its internal buffers automatically
-call setup_trans(ksmax=nsmax, kdgl=ndgl, kloen=nloen, ldsplit=.true.,       &
-  &              ldusefftw=lfftw, lduserpnm=luserpnm, ldkeeprpnm=lkeeprpnm, &
-  &              lduseflt=luseflt)
+call setup_trans(kflev=nflevl, ksmax=nsmax, kdgl=ndgl, kloen=nloen, ldsplit=.true.,          &
+  &                 ldusefftw=lfftw, lduserpnm=luserpnm, ldkeeprpnm=lkeeprpnm, &
+  &                 lduseflt=luseflt)
 call gstats(2, 1)
 
 call trans_inq(kspec2=nspec2, kspec2g=nspec2g, kgptot=ngptot, kgptotg=ngptotg)
@@ -441,10 +469,14 @@ if (verbosity >= 0) then
   write(nout,'("ngpblks   ",i0)') ngpblks
   write(nout,'("nspec2    ",i0)') nspec2
   write(nout,'("nspec2g   ",i0)') nspec2g
+  write(nout,'("nzonal    ",i0)') nzonal
+  write(nout,'("ntotal    ",i0)') ntotal
+  write(nout,'("limag     ",l)') limag
   write(nout,'("luseflt   ",l)') luseflt
   write(nout,'("lvordiv   ",l)') lvordiv
   write(nout,'("lscders   ",l)') lscders
   write(nout,'("luvders   ",l)') luvders
+  write(nout,'("lgpnorms  ",l)') lgpnorms
   write(nout,'(" ")')
   write(nout,'(a)') '======= End of runtime parameters ======='
   write(nout,'(" ")')
@@ -460,9 +492,7 @@ nullify(zspvor)
 nullify(zspdiv)
 nullify(zspsc3a)
 allocate(sp3d(nflevl,nspec2,2+nfld))
-allocate(zspsc2(1,nspec2))
-
-call initialize_spectral_arrays(nsmax, zspsc2, sp3d)
+allocate(zspsc2(1,nspec2),zspsc2b(1,nspec2))
 
 ! Point convenience variables to storage variable sp3d
 zspvor  => sp3d(:,:,1)
@@ -501,8 +531,8 @@ else
   jend_vder_EW   = jend_uv
 endif
 
-jbegin_sc = jbegin_vder_EW + 1
-jend_sc   = jbegin_vder_EW + nfld
+jbegin_sc = jend_vder_EW + 1
+jend_sc   = jend_vder_EW + nfld
 
 if (lscders) then
   ndimgmvs = 3
@@ -519,13 +549,23 @@ else
 endif
 
 ndimgmv = jend_scder_EW
-
+!DEBUGGING:
+print*,"ndimgmv=",ndimgmv," ndimgmvs=",ndimgmvs
 allocate(zgmv(nproma,nflevg,ndimgmv,ngpblks))
 allocate(zgmvs(nproma,ndimgmvs,ngpblks))
 
 zgpuv => zgmv(:,:,1:jend_vder_EW,:)
 zgp3a => zgmv(:,:,jbegin_sc:jend_scder_EW,:)
 zgp2  => zgmvs(:,:,:)
+
+allocate(zsph_analytic(nproma,ngpblks),zewde_analytic(nproma,ngpblks), &
+  & znsde_analytic(nproma,ngpblks),nlatidxs(nproma,ngpblks),zsinlats(ndgl))
+call analytic_init(nproma, ngpblks, ndgl, n_regions_ns, n_regions_ew, nloen)
+!call buffer_legendre_polynomials(nsmax)
+!call buffer_legendre_polynomials_belusov(nsmax)
+call buffer_legendre_polynomials_ectrans(nsmax, ndgl)
+call buffer_legendre_polynomials_supolf(nsmax)
+call check_legendre_polynomials(nsmax, ndgl)
 
 !===================================================================================================
 ! Allocate norm arrays
@@ -596,46 +636,151 @@ write(nout,'(" ")')
 
 ztloop = timef()
 
-!===================================================================================================
-! Do spectral transform loop
-!===================================================================================================
+! test different paradigms with small trans first, single field + derivatives, emulating sporog trans in IFS
+write(nout,*) 'Test sporog like single transform ...'
+call flush(nout)
+! special case when single transform, reset later
+iprev = ivsetsc(1)
+ivsetsc(1) = nprtrv
+ilf = 0
+if(nprtrv == mysetv) then
+  ilf = 1
+endif
+allocate(zreel(nproma,3,ngpblks))
+call init_check_fields(lwrite_errors)
+!do ntotal = 0,nsmax
+!  do nzonal = 0,ntotal
+    zreel(:,:,:)  = 0._jprb
+    zgmv(:,:,:,:) = 0._jprb
+    zgmvs(:,:,:)  = 0._jprb
+    call initialize_spectral_arrays(nsmax, zspsc2, sp3d, nzonal, ntotal, limag, nindex)
+    zspsc2b = zspsc2
+    call compute_analytic_solution(nproma, ngpblks, nsmax, ngptot, nzonal, ntotal, limag, zsph_analytic)
+    call compute_analytic_eastwest_derivative(nproma, ngpblks, nsmax, ngptot, nzonal, ntotal, limag, zewde_analytic)
+    call compute_analytic_northsouth_derivative(nproma, ngpblks, nsmax, ngptot, nzonal, ntotal, limag, znsde_analytic)
+    do jstep = 1, iters
+      ! single transform
+      call inv_trans(kresol=1, kproma=nproma,   &
+        & pspscalar=zspsc2b(1:ilf,:),           & ! spectral scalar
+        & ldscders=.true.,                      & ! scalar derivatives
+        & kvsetsc=ivsetsc,                      &
+        & pgp=zreel)
+      if (lvordiv) then
+        ! full time step
+        call inv_trans(kresol=1, kproma=nproma, &
+          & pspsc2=zspsc2,                      & ! spectral surface pressure
+          & pspvor=zspvor,                      & ! spectral vorticity
+          & pspdiv=zspdiv,                      & ! spectral divergence
+          & pspsc3a=zspsc3a,                    & ! spectral scalars
+          & ldscders=lscders,                   &
+          & ldvorgp=.false.,                    & ! no gridpoint vorticity
+          & lddivgp=.false.,                    & ! no gridpoint divergence
+          & lduvder=luvders,                    &
+          & kvsetuv=ivset,                      &
+          & kvsetsc2=ivsetsc,                   &
+          & kvsetsc3a=ivset,                    &
+          & pgp2=zgp2,                          &
+          & pgpuv=zgpuv,                        &
+          & pgp3a=zgp3a)
+      else
+        call inv_trans(kresol=1, kproma=nproma, &
+            & pspsc2=zspsc2,                    & ! spectral surface pressure
+            & pspsc3a=zspsc3a,                  & ! spectral scalars
+            & ldscders=lscders,                 & ! scalar derivatives
+            & kvsetsc2=ivsetsc,                 &
+            & kvsetsc3a=ivset,                  &
+            & pgp2=zgp2,                        &
+            & pgp3a=zgp3a)
+      endif
+      lpassed = lpassed .and. check_gp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, real(zreel,kind=jprd), real(zgp2,kind=jprd), real(zgp3a,kind=jprd), zsph_analytic, znsde_analytic, zewde_analytic, nout)
+      call dir_trans(kresol=1, kproma=nproma,   &
+        & pgp=zreel(:,:,:),                     &
+        & pspscalar=zspsc2b(1:ilf,:),           & ! spectral scalar
+        & kvsetsc=ivsetsc)
+      if (lvordiv) then
+        call dir_trans(kresol=1, kproma=nproma, &
+          & pgp2=zgmvs(:,1:1,:),                &
+          & pgpuv=zgpuv(:,:,1:2,:),             &
+          & pgp3a=zgp3a(:,:,1:nfld,:),          &
+          & pspvor=zspvor,                      &
+          & pspdiv=zspdiv,                      &
+          & pspsc2=zspsc2,                      &
+          & pspsc3a=zspsc3a,                    &
+          & kvsetuv=ivset,                      &
+          & kvsetsc2=ivsetsc,                   &
+          & kvsetsc3a=ivset)
+      else
+        call dir_trans(kresol=1, kproma=nproma, &
+           & pgp=zgp3a(:,1,1:nfld,:),           &
+           & pspscalar=zspsc3a(1:1,1:nfld,1),   & ! spectral scalar
+           & kvsetsc=ivset)
+      endif
+      lpassed = lpassed .and. check_sp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, nindex, real(zspsc2,kind=jprd), real(zspsc2b,kind=jprd), real(zspsc3a,kind=jprd), nout)
+    enddo
+    print*,"m=",nzonal," n=",ntotal
+!  end do
+!end do
 
-do jstep = 1, iters
-  call gstats(3,0)
-  ztstep(jstep) = timef()
+deallocate(zreel)
 
-  !=================================================================================================
-  ! Do inverse transform
-  !=================================================================================================
+    if( lgpnorms ) then
+    write(nout,*) 'statistics gpnorm_trans all levels ...'
+    call flush(nout)
+    allocate(zave(nflevg))
+    allocate(zmin(nflevg))
+    allocate(zmax(nflevg))
+    ! vorticity only, all levels
+    ifld=1
+    call gpnorm_trans_cpu(zgpuv(:,1:nflevg,ifld,:),nflevg,nproma,zave,zmin,zmax,.false.,1)
+    !call gpnorm_trans(zgpuv(:,1:nflevg,ifld,:),nflevg,nproma,zave,zmin,zmax,.false.,1)
+    do jf=1,nflevg
+    write(nout,*) 'Statistics vorticity level= ',jf,' : ave,min,max ',zave(jf),zmin(jf),zmax(jf)
+    call flush(nout)
+    enddo
+    deallocate(zave)
+    deallocate(zmin)
+    deallocate(zmax)
+    endif
 
-  ztstep1(jstep) = timef()
-  call gstats(4,0)
-  if (lvordiv) then
+    ! test different paradigms with small trans first, single field + derivatives, emulating sporog trans in IFS
+    write(nout,*) 'Test sporog like single transform ...'
+    call flush(nout)
+    ! special case when single transform, reset later
+    iprev = ivsetsc(1)
+    ivsetsc(1) = nprtrv
+    ilf = 0
+    if(nprtrv == mysetv) then
+      ilf = 1
+    endif
+    allocate(zreel(nproma,3,ngpblks))
+    zreel(:,:,:)=0._jprb
     call inv_trans(kresol=1, kproma=nproma, &
-       & pspsc2=zspsc2,                     & ! spectral surface pressure
-       & pspvor=zspvor,                     & ! spectral vorticity
-       & pspdiv=zspdiv,                     & ! spectral divergence
-       & pspsc3a=zspsc3a,                   & ! spectral scalars
-       & ldscders=lscders,                  &
-       & ldvorgp=.false.,                   & ! no gridpoint vorticity
-       & lddivgp=.false.,                   & ! no gridpoint divergence
-       & lduvder=luvders,                   &
-       & kvsetuv=ivset,                     &
-       & kvsetsc2=ivsetsc,                  &
-       & kvsetsc3a=ivset,                   &
-       & pgp2=zgp2,                         &
-       & pgpuv=zgpuv,                       &
-       & pgp3a=zgp3a)
-  else
-    call inv_trans(kresol=1, kproma=nproma, &
-       & pspsc2=zspsc2,                     & ! spectral surface pressure
-       & pspsc3a=zspsc3a,                   & ! spectral scalars
-       & ldscders=lscders,                  & ! scalar derivatives
-       & kvsetsc2=ivsetsc,                  &
-       & kvsetsc3a=ivset,                   &
-       & pgp2=zgp2,                         &
-       & pgp3a=zgp3a)
-  endif
+       & pspscalar=zspsc2(1:ilf,:),         & ! spectral scalar
+       & ldscders=.true.,                   & ! scalar derivatives
+       & kvsetsc=ivsetsc,                   &
+       & pgp=zreel)
+
+    if( lgpnorms ) then
+    ! reset prev value
+    ivsetsc(1) = iprev
+    write(nout,*) 'statistics gpnorm_trans ...'
+    call flush(nout)
+    ifld=3
+    allocate(zave(ifld))
+    allocate(zmin(ifld))
+    allocate(zmax(ifld))
+    call gpnorm_trans_cpu(zreel,ifld,nproma,zave,zmin,zmax,.false.,kresol=1)
+    !call gpnorm_trans(zreel,ifld,nproma,zave,zmin,zmax,.false.,kresol=1)
+    do jf=1,ifld
+    write(nout,*) '2nd Statistics field= ',jf,' : ave,min,max ',zave(jf),zmin(jf),zmax(jf)
+    call flush(nout)
+    enddo
+    deallocate(zave)
+    deallocate(zmin)
+    deallocate(zmax)
+    endif
+    deallocate(zreel)
+
   call gstats(4,1)
 
   ztstep1(jstep) = (timef() - ztstep1(jstep))/1000.0_jprd
@@ -673,12 +818,16 @@ do jstep = 1, iters
       & kvsetsc3a=ivset)
   else
     call dir_trans(kresol=1, kproma=nproma, &
-      & pgp2=zgmvs(:,1:1,:),                &
-      & pgp3a=zgp3a(:,:,1:nfld,:),          &
-      & pspsc2=zspsc2,                      &
-      & pspsc3a=zspsc3a,                    &
-      & kvsetsc2=ivsetsc,                   &
-      & kvsetsc3a=ivset)
+       & pgp=zgp3a(:,1,1:nfld,:),              &
+       & pspscalar=zspsc3a(1:1,1:nfld,1), & ! spectral scalar
+       & kvsetsc=ivset)
+!    call dir_trans(kresol=1, kproma=nproma, &
+!      & pgp2=zgmvs(:,1:1,:),                &
+!      & pgp3a=zgp3a(:,:,1:nfld,:),          &
+!      & pspsc2=zspsc2,                      &
+!      & pspsc3a=zspsc3a,                    &
+!      & kvsetsc2=ivsetsc,                   &
+!      & kvsetsc3a=ivset)
   endif
   call gstats(5,1)
   ztstep2(jstep) = (timef() - ztstep2(jstep))/1000.0_jprd
@@ -713,39 +862,34 @@ do jstep = 1, iters
     call specnorm(pspec=zspsc3a(1:nflevl,:,1), pnorm=znormt,   kvset=ivset(1:nflevg))
 
     ! Surface pressure
-    if (myproc == 1) then
-      zmaxerr(:) = -999.0
-      do ifld = 1, 1
-        write(nout,*) "znormsp", znormsp
-        call flush(nout)
-        zerr(1) = abs(znormsp1(ifld)/znormsp(ifld) - 1.0_jprb)
-        zmaxerr(1) = max(zmaxerr(1), zerr(1))
-      enddo
-      ! Divergence
-      do ifld = 1, nflevg
-        zerr(2) = abs(znormdiv1(ifld)/znormdiv(ifld) - 1.0_jprb)
-        zmaxerr(2) = max(zmaxerr(2), zerr(2))
-      enddo
-      ! Vorticity
-      do ifld = 1, nflevg
-        zerr(3) = abs(znormvor1(ifld)/znormvor(ifld) - 1.0_jprb)
-        zmaxerr(3) = max(zmaxerr(3),zerr(3))
-      enddo
-      ! Temperature
-      do ifld = 1, nflevg
-        zerr(4) = abs(znormt1(ifld)/znormt(ifld) - 1.0_jprb)
-        zmaxerr(4) = max(zmaxerr(4), zerr(4))
-      enddo
-      write(nout,'("time step ",i6," took", f8.4," | zspvor max err="e10.3,&
-                  & " | zspdiv max err="e10.3," | zspsc3a max err="e10.3," | zspsc2 max err="e10.3)') &
-                  &  jstep, ztstep(jstep), zmaxerr(3), zmaxerr(2), zmaxerr(4), zmaxerr(1)
-    endif
+    zmaxerr(:) = -999.0
+    do ifld = 1, 1
+      zerr(1) = abs(znormsp1(ifld)/znormsp(ifld) - 1.0_jprb)
+      zmaxerr(1) = max(zmaxerr(1), zerr(1))
+    enddo
+    ! Divergence
+    do ifld = 1, nflevg
+      zerr(2) = abs(znormdiv1(ifld)/znormdiv(ifld) - 1.0_jprb)
+      zmaxerr(2) = max(zmaxerr(2), zerr(2))
+    enddo
+    ! Vorticity
+    do ifld = 1, nflevg
+      zerr(3) = abs(znormvor1(ifld)/znormvor(ifld) - 1.0_jprb)
+      zmaxerr(3) = max(zmaxerr(3),zerr(3))
+    enddo
+    ! Temperature
+    do ifld = 1, nflevg
+      zerr(4) = abs(znormt1(ifld)/znormt(ifld) - 1.0_jprb)
+      zmaxerr(4) = max(zmaxerr(4), zerr(4))
+    enddo
+    write(nout,'("time step ",i6," took", f8.4," | zspvor max err="e10.3,&
+                & " | zspdiv max err="e10.3," | zspsc3a max err="e10.3," | zspsc2 max err="e10.3)') &
+                &  jstep, ztstep(jstep), zmaxerr(3), zmaxerr(2), zmaxerr(4), zmaxerr(1)
     call gstats(6,1)
   else
     write(nout,'("Time step ",i6," took", f8.4)') jstep, ztstep(jstep)
   endif
   call gstats(3,1)
-enddo
 
 !===================================================================================================
 
@@ -761,60 +905,58 @@ if (lprint_norms .or. ncheck > 0) then
   call specnorm(pspec=zspsc3a(1:nflevl,:,1), pnorm=znormt,   kvset=ivset)
   call specnorm(pspec=zspsc2(1:1,:),         pnorm=znormsp,  kvset=ivsetsc)
 
-  if (myproc == 1) then
-    zmaxerr(:) = -999.0
-    do ifld = 1, nflevg
-      zerr(3) = abs(real(znormvor1(ifld),kind=jprd)/real(znormvor(ifld),kind=jprd) - 1.0_jprd)
-      zmaxerr(3) = max(zmaxerr(3), zerr(3))
-      if (verbosity >= 1) then
-        write(nout,'("norm zspvor( ",i4,")     = ",f20.15,"        error = ",e10.3)') ifld, znormvor1(ifld), zerr(3)
-      endif
-    enddo
-    do ifld = 1, nflevg
-      zerr(2) = abs(real(znormdiv1(ifld),kind=jprd)/real(znormdiv(ifld),kind=jprd) - 1.0d0)
-      zmaxerr(2) = max(zmaxerr(2),zerr(2))
-      if (verbosity >= 1) then
-        write(nout,'("norm zspdiv( ",i4,",:)   = ",f20.15,"        error = ",e10.3)') ifld, znormdiv1(ifld), zerr(2)
-      endif
-    enddo
-    do ifld = 1, nflevg
-      zerr(4) = abs(real(znormt1(ifld),kind=jprd)/real(znormt(ifld),kind=jprd) - 1.0d0)
-      zmaxerr(4) = max(zmaxerr(4), zerr(4))
-      if (verbosity >= 1) then
-        write(nout,'("norm zspsc3a(",i4,",:,1) = ",f20.15,"        error = ",e10.3)') ifld, znormt1(ifld), zerr(4)
-      endif
-    enddo
-    do ifld = 1, 1
-      zerr(1) = abs(real(znormsp1(ifld),kind=jprd)/real(znormsp(ifld),kind=jprd) - 1.0d0)
-      zmaxerr(1) = max(zmaxerr(1), zerr(1))
-      if (verbosity >= 1) then
-        write(nout,'("norm zspsc2( ",i4,",:)   = ",f20.15,"        error = ",e10.3)') ifld, znormsp1(ifld), zerr(1)
-      endif
-    enddo
+  zmaxerr(:) = -999.0
+  do ifld = 1, nflevg
+    zerr(3) = abs(real(znormvor1(ifld),kind=jprd)/real(znormvor(ifld),kind=jprd) - 1.0_jprd)
+    zmaxerr(3) = max(zmaxerr(3), zerr(3))
+    if (verbosity >= 1) then
+      write(nout,'("norm zspvor( ",i4,")     = ",f20.15,"        error = ",e10.3)') ifld, znormvor1(ifld), zerr(3)
+    endif
+  enddo
+  do ifld = 1, nflevg
+    zerr(2) = abs(real(znormdiv1(ifld),kind=jprd)/real(znormdiv(ifld),kind=jprd) - 1.0d0)
+    zmaxerr(2) = max(zmaxerr(2),zerr(2))
+    if (verbosity >= 1) then
+      write(nout,'("norm zspdiv( ",i4,",:)   = ",f20.15,"        error = ",e10.3)') ifld, znormdiv1(ifld), zerr(2)
+    endif
+  enddo
+  do ifld = 1, nflevg
+    zerr(4) = abs(real(znormt1(ifld),kind=jprd)/real(znormt(ifld),kind=jprd) - 1.0d0)
+    zmaxerr(4) = max(zmaxerr(4), zerr(4))
+    if (verbosity >= 1) then
+      write(nout,'("norm zspsc3a(",i4,",:,1) = ",f20.15,"        error = ",e10.3)') ifld, znormt1(ifld), zerr(4)
+    endif
+  enddo
+  do ifld = 1, 1
+    zerr(1) = abs(real(znormsp1(ifld),kind=jprd)/real(znormsp(ifld),kind=jprd) - 1.0d0)
+    zmaxerr(1) = max(zmaxerr(1), zerr(1))
+    if (verbosity >= 1) then
+      write(nout,'("norm zspsc2( ",i4,",:)   = ",f20.15,"        error = ",e10.3)') ifld, znormsp1(ifld), zerr(1)
+    endif
+  enddo
 
-    ! maximum error across all fields
-    zmaxerrg = max(max(zmaxerr(1),zmaxerr(2)), max(zmaxerr(2), zmaxerr(3)))
+  ! maximum error across all fields
+  zmaxerrg = max(max(zmaxerr(1),zmaxerr(2)), max(zmaxerr(2), zmaxerr(3)))
 
-    if (verbosity >= 1) write(nout,*)
-    write(nout,'("max error zspvor(1:nlev,:)    = ",e10.3)') zmaxerr(3)
-    write(nout,'("max error zspdiv(1:nlev,:)    = ",e10.3)') zmaxerr(2)
-    write(nout,'("max error zspsc3a(1:nlev,:,1) = ",e10.3)') zmaxerr(4)
-    write(nout,'("max error zspsc2(1:1,:)       = ",e10.3)') zmaxerr(1)
-    write(nout,*)
-    write(nout,'("max error combined =          = ",e10.3)') zmaxerrg
-    write(nout,*)
+  if (verbosity >= 1) write(nout,*)
+  write(nout,'("max error zspvor(1:nlev,:)    = ",e10.3)') zmaxerr(3)
+  write(nout,'("max error zspdiv(1:nlev,:)    = ",e10.3)') zmaxerr(2)
+  write(nout,'("max error zspsc3a(1:nlev,:,1) = ",e10.3)') zmaxerr(4)
+  write(nout,'("max error zspsc2(1:1,:)       = ",e10.3)') zmaxerr(1)
+  write(nout,*)
+  write(nout,'("max error combined =          = ",e10.3)') zmaxerrg
+  write(nout,*)
 
-    if (ncheck > 0) then
-      ! If the maximum spectral norm error across all fields is greater than 100 times the machine
-      ! epsilon, fail the test
-      if (zmaxerrg > real(ncheck, jprb) * epsilon(1.0_jprb)) then
-        write(nout, '(a)') '*******************************'
-        write(nout, '(a)') 'Correctness test failed'
-        write(nout, '(a,1e7.2)') 'Maximum spectral norm error = ', zmaxerrg
-        write(nout, '(a,1e7.2)') 'Error tolerance = ', real(ncheck, jprb) * epsilon(1.0_jprb)
-        write(nout, '(a)') '*******************************'
-        error stop
-      endif
+  if (ncheck > 0 .and. myproc == 1) then
+    ! If the maximum spectral norm error across all fields is greater than 100 times the machine
+    ! epsilon, fail the test
+    if (zmaxerrg > real(ncheck, jprb) * epsilon(1.0_jprb)) then
+      write(nout, '(a)') '*******************************'
+      write(nout, '(a)') 'Correctness test failed'
+      write(nout, '(a,1e7.2)') 'Maximum spectral norm error = ', zmaxerrg
+      write(nout, '(a,1e7.2)') 'Error tolerance = ', real(ncheck, jprb) * epsilon(1.0_jprb)
+      write(nout, '(a)') '*******************************'
+      error stop
     endif
   endif
 endif
@@ -977,6 +1119,25 @@ end subroutine
 
 !===================================================================================================
 
+function get_real_value(cname, iarg) result(value)
+
+  real :: value
+  character(len=*), intent(in) :: cname
+  integer, intent(inout) :: iarg
+  character(len=128) :: carg
+  integer :: stat
+
+  carg = get_str_value(cname, iarg)
+  call str2real(carg, value, stat)
+
+  if (stat /= 0) then
+    call parsing_failed("Invalid argument for " // trim(cname) // ": " // trim(carg))
+  end if
+
+end function
+
+!===================================================================================================
+
 function get_int_value(cname, iarg) result(value)
 
   integer :: value
@@ -1028,9 +1189,9 @@ end subroutine
 
 !===================================================================================================
 
-subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, lscders, luvders, &
-  &                                   luseflt, nproma, verbosity, ldump_values, lprint_norms, &
-  &                                   lmeminfo, nprtrv, nprtrw, ncheck)
+subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, lscders, luvders, lgpnorms, &
+  &                                   luseflt, nproma, verbosity, ldump_values, lprint_norms, lwrite_errors, &
+  &                                   lmeminfo, nprtrv, nprtrw, ncheck, ntotal, nzonal, limag, rtolerance)
 
   integer, intent(inout) :: nsmax           ! Spectral truncation
   character(len=16), intent(inout) :: cgrid ! Spectral truncation
@@ -1040,17 +1201,23 @@ subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, 
   logical, intent(inout) :: lvordiv         ! Also transform vorticity/divergence
   logical, intent(inout) :: lscders         ! Compute scalar derivatives
   logical, intent(inout) :: luvders         ! Compute uv East-West derivatives
+  logical, intent(inout) :: lgpnorms        ! calculate/print gpnorms
   logical, intent(inout) :: luseflt         ! Use fast Legendre transforms
   integer, intent(inout) :: nproma          ! NPROMA
   integer, intent(inout) :: verbosity       ! Level of verbosity
   logical, intent(inout) :: ldump_values    ! Dump values of grid point fields for debugging
   logical, intent(inout) :: lprint_norms    ! Calculate and print spectral norms of fields
+  logical, intent(inout) :: lwrite_errors   ! Write error files for all tested wavenumbers
   logical, intent(inout) :: lmeminfo        ! Show information from FIAT ec_meminfo routine at the
                                             ! end
   integer, intent(inout) :: nprtrv          ! Size of V set (spectral decomposition)
   integer, intent(inout) :: nprtrw          ! Size of W set (spectral decomposition)
   integer, intent(inout) :: ncheck          ! The multiplier of the machine epsilon used as a
                                             ! tolerance for correctness checking
+  integer, intent(inout) :: ntotal          ! total wavenumber to be tested
+  integer, intent(inout) :: nzonal          ! zonal wavenumber to be tested
+  logical, intent(inout) :: limag           ! test imaginary part
+  real(jprd), intent(inout) :: rtolerance      ! relative error tolerance for analytic solutions
 
   character(len=128) :: carg          ! Storage variable for command line arguments
   integer            :: iarg = 1      ! Argument index
@@ -1085,17 +1252,23 @@ subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, 
       case('-g', '--grid'); cgrid = get_str_value('-g', iarg)
       case('-f', '--nfld'); nfld = get_int_value('-f', iarg)
       case('-l', '--nlev'); nlev = get_int_value('-l', iarg)
+      case('--nzonal'); nzonal = get_int_value('--nzonal', iarg)
+      case('--ntotal'); ntotal = get_int_value('--ntotal', iarg)
+      case('--imaginary'); limag = .true.
       case('--vordiv'); lvordiv = .True.
       case('--scders'); lscders = .True.
       case('--uvders'); luvders = .True.
+      case('--lgpnorms'); lgpnorms = .True.
       case('--flt'); luseflt = .True.
       case('--nproma'); nproma = get_int_value('--nproma', iarg)
       case('--dump-values'); ldump_values = .true.
       case('--norms'); lprint_norms = .true.
+      case('--errorfiles'); lwrite_errors = .true.
       case('--meminfo'); lmeminfo = .true.
       case('--nprtrv'); nprtrv = get_int_value('--nprtrv', iarg)
       case('--nprtrw'); nprtrw = get_int_value('--nprtrw', iarg)
       case('-c', '--check'); ncheck = get_int_value('-c', iarg)
+      case('--tolerance'); rtolerance = get_real_value('--tolerance', iarg)
       case default
         call parsing_failed("Unrecognised argument: " // trim(carg))
 
@@ -1129,6 +1302,17 @@ subroutine str2int(str, int, stat)
   read(str, *, iostat=stat) int
 
 end subroutine str2int
+
+!===================================================================================================
+
+subroutine str2real(str, real, stat)
+
+  character(len=*), intent(in) :: str
+  real, intent(out) :: real
+  integer, intent(out) :: stat
+  read(str, *, iostat=stat) real
+
+end subroutine str2real
 
 !===================================================================================================
 
@@ -1228,48 +1412,23 @@ end subroutine print_help
 
 !===================================================================================================
 
-subroutine initialize_spectral_arrays(nsmax, zsp, sp3d)
+subroutine initialize_spectral_arrays(nsmax, zsp, sp3d, kzonal, ktotal, kimag, kindex)
 
-  integer,         intent(in)    :: nsmax       ! Spectral truncation
-  real(kind=jprb), intent(inout) :: zsp(:,:)    ! Surface pressure
-  real(kind=jprb), intent(inout) :: sp3d(:,:,:) ! 3D fields
+  integer,            intent(in)    :: nsmax       ! Spectral truncation
+  real(kind=jprb),    intent(inout) :: zsp(:,:)    ! Surface pressure
+  real(kind=jprb),    intent(inout) :: sp3d(:,:,:) ! 3D fields
+  integer,            intent(in)    :: kzonal      ! Zonal wavenumber
+  integer,            intent(in)    :: ktotal      ! Total wavenumber
+  logical,            intent(in)    :: kimag       ! test imaginary part
+  integer(kind=jpim), intent(out)   :: kindex      ! return index that was set to 1
 
   integer(kind=jpim) :: nflevl
   integer(kind=jpim) :: nfield
 
   integer :: i, j
 
-  nflevl = size(sp3d, 1)
-  nfield = size(sp3d, 3)
-
-  ! First initialize surface pressure
-  call initialize_2d_spectral_field(nsmax, zsp(1,:))
-
-  ! Then initialize all of the 3D fields
-  do i = 1, nflevl
-    do j = 1, nfield
-      call initialize_2d_spectral_field(nsmax, sp3d(i,:,j))
-    end do
-  end do
-
-end subroutine initialize_spectral_arrays
-
-!===================================================================================================
-
-subroutine initialize_2d_spectral_field(nsmax, field)
-
-  integer,         intent(in)    :: nsmax    ! Spectral truncation
-  real(kind=jprb), intent(inout) :: field(:) ! Field to initialize
-
   integer :: i, index, num_my_zon_wns
   integer, allocatable :: my_zon_wns(:), nasm0(:)
-
-  ! Choose a spherical harmonic to initialize arrays
-  integer :: m_num = 4  ! Zonal wavenumber
-  integer :: l_num = 19  ! Total wavenumber
-
-  ! First initialise all spectral coefficients to zero
-  field(:) = 0.0
 
   ! Get zonal wavenumbers this rank is responsible for
   call trans_inq(knump=num_my_zon_wns)
@@ -1277,16 +1436,49 @@ subroutine initialize_2d_spectral_field(nsmax, field)
   call trans_inq(kmyms=my_zon_wns)
 
   ! If rank is responsible for the chosen zonal wavenumber...
-  if (any(my_zon_wns == m_num) ) then
+  if (any(my_zon_wns == kzonal) ) then
     ! Get array of spectral array addresses (this maps (m, n=m) to array index)
     allocate(nasm0(0:nsmax))
     call trans_inq(kasm0=nasm0)
 
     ! Find out local array index of chosen spherical harmonic
-    index = nasm0(m_num) + 2 * (l_num - m_num) + 1
+    index = nasm0(kzonal) + 2 * (ktotal - kzonal)
+    if(kimag) index = index + 1
 
+    kindex = index
+  else
+    kindex = -1
+  end if
+
+  nflevl = size(sp3d, 1)
+  nfield = size(sp3d, 3)
+
+  ! First initialize surface pressure
+  call initialize_2d_spectral_field(zsp(1,:), kindex)
+
+  ! Then initialize all of the 3D fields
+  do i = 1, nflevl
+    do j = 1, nfield
+      call initialize_2d_spectral_field(sp3d(i,:,j), kindex)
+    end do
+  end do
+
+end subroutine initialize_spectral_arrays
+
+!===================================================================================================
+
+subroutine initialize_2d_spectral_field(field, kindex)
+
+  real(kind=jprb), intent(inout) :: field(:) ! Field to initialize
+  integer,         intent(out)   :: kindex   ! return index that is set to one for testing result
+
+  ! First initialise all spectral coefficients to zero
+  field(:) = 0.0
+
+  ! If rank is responsible for the chosen zonal wavenumber...
+  if (kindex > 0) then
     ! Set just that element to a constant value
-    field(index) = 1.0
+    field(kindex) = 1.0
   else
     return
   end if
@@ -1370,16 +1562,6 @@ subroutine gstats_labels
   call gstats_label(400, '   ', 'GSTATS         - GSTATS itself')
 
 end subroutine gstats_labels
-
-!===================================================================================================
-
-subroutine set_ectrans_gpu_nflev(kflev)
-  use ec_env_mod, only : ec_putenv
-  integer(kind=jpim), intent(in) :: kflev
-  character(len=32) :: ECTRANS_GPU_NFLEV
-  write(ECTRANS_GPU_NFLEV,'(A,I0)') "ECTRANS_GPU_NFLEV=",kflev
-  call ec_putenv(ECTRANS_GPU_NFLEV, overwrite=.true.)
-end subroutine
 
 end program transform_test
 
