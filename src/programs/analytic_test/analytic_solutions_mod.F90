@@ -432,8 +432,8 @@ module analytic_solutions_mod
     abs_m = abs(m)
     if(n<abs_m) call abor1("Error in analytic_spherical_harmonic_point_northsouth_derivative: assertion (n >= abs_m) failed")
     colat = z_pi/2.0 - lat
-    coeff_a = (n+1)*sqrt((n*n-m*m)/(4.0*n*n-1))
-    coeff_b = -n*sqrt(((n+1)*(n+1)-m*m)/(4.0*(n+1)*(n+1)-1))
+    coeff_a = (n+1)*sqrt(real(n*n-m*m,jprd)/real(4.0*n*n-1,jprd))
+    coeff_b = -n*sqrt(real((n+1)*(n+1)-m*m,jprd)/real(4.0*(n+1)*(n+1)-1,jprd))
     if (m == 0) then
       if (imag) then
         pointValue = 0.0
@@ -481,9 +481,7 @@ module analytic_solutions_mod
       ioff = jkglo - 1
       ibl  = (jkglo-1)/nproma+1
       do jrof=1,iend
-  !      sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_eastwest_derivative( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
         sph_analytic(jrof,ibl) = analytic_eastwest_derivative_point( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(nlatidxs(jrof,ibl), kzonal, ktotal))
-        !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
       end do
     end do
   
@@ -510,16 +508,17 @@ module analytic_solutions_mod
       ioff = jkglo - 1
       ibl  = (jkglo-1)/nproma+1
       do jrof=1,iend
-        if(ktotal<nsmax+1) then
-          legpolyp1 = legpolys(nlatidxs(jrof,ibl), kzonal, ktotal+1)
+        if(kzonal<=nmeng(nlatidxs(jrof,ibl))) then
+          if(ktotal<nsmax+1) then
+            legpolyp1 = legpolys(nlatidxs(jrof,ibl), kzonal, ktotal+1)
+          end if
+          if(ktotal>0) then
+            legpolym1 = legpolys(nlatidxs(jrof,ibl), kzonal, ktotal-1)
+          end if
+          sph_analytic(jrof,ibl) = analytic_northsouth_derivative_point( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolyp1, legpolym1)
+        else
+          sph_analytic(jrof,ibl) = 0.0
         end if
-        if(ktotal>0) then
-          legpolym1 = legpolys(nlatidxs(jrof,ibl), kzonal, ktotal-1)
-        end if
-        !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_northsouth_derivative_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
-        !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_northsouth_derivative( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
-        sph_analytic(jrof,ibl) = analytic_northsouth_derivative_point( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolyp1, legpolym1)
-        !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
       end do
     end do
   
@@ -572,12 +571,12 @@ module analytic_solutions_mod
 
     if(lwrite_errors) then
       write(33342,'("lmax-error in grid point space")')
-      write(33342,'("             ┃           grid point data        │      north-south derivative      │       east-west derivative ")')
-      write(33342,'("   m   n it. ┃        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a ")')
-      write(33342,'("━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
+      write(33342,'("              ┃           grid point data        │      north-south derivative      │       east-west derivative ")')
+      write(33342,'("   m   n it.  ┃        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a ")')
+      write(33342,'("━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
       write(33344,'("lmax-error in spectral space")')
-      write(33344,'("   m   n it. ┃     zspsc2    zspsc2b       zspsc3a ")')
-      write(33344,'("━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
+      write(33344,'("   m   n it.  ┃     zspsc2    zspsc2b       zspsc3a ")')
+      write(33344,'("━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
       call flush(33342)
       call flush(33344)
     end if
@@ -586,7 +585,7 @@ module analytic_solutions_mod
 
   !===================================================================================================
 
-  function check_gp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, zreel, zgp2, zgp3a, zsph_analytic, znsde_analytic, zewde_analytic, nout) result(lpassed_all)
+  function check_gp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, limag, zreel, zgp2, zgp3a, zsph_analytic, znsde_analytic, zewde_analytic, nout) result(rlmax_error)
 
     use parkind1, only: jprb
 
@@ -595,8 +594,10 @@ module analytic_solutions_mod
     real(kind=jprd), intent(in) :: rtolerance ! jprb would be enough
     logical, intent(in) :: lwrite_errors
     integer(kind=jpim), intent(in) :: jstep, nzonal, ntotal, nflevg, nfld
+    logical, intent(in) :: limag
     real(kind=jprd), intent(in) :: zreel(:,:,:), zgp2(:,:,:), zgp3a(:,:,:,:) ! should be jprb
     real(kind=jprd), intent(in) :: zsph_analytic(:,:), znsde_analytic(:,:), zewde_analytic(:,:)
+    real(kind=jprd), intent(out) :: rlmax_error
     integer(kind=jpim) :: nout
     real(kind=jprd) :: rlmax_quo, rlmax_nsde_quo, rlmax_ewde_quo, rlmax_fac, rlmax_nsde_fac, rlmax_ewde_fac
     real(kind=jprd) :: rlmax_errors(nflevg*nfld+2), rlmax_errors_nsde(nflevg*nfld+2), rlmax_errors_ewde(nflevg*nfld+2)
@@ -610,9 +611,9 @@ module analytic_solutions_mod
     rlmax_fac = 1.0_jprd
     rlmax_nsde_fac = 1.0_jprd
     rlmax_ewde_fac = 1.0_jprd
-    !if(     rlmax_quo>0.0)      rlmax_fac = 1.0_jprd/     rlmax_quo
-    !if(rlmax_nsde_quo>0.0) rlmax_nsde_fac = 1.0_jprd/rlmax_nsde_quo
-    !if(rlmax_ewde_quo>0.0) rlmax_ewde_fac = 1.0_jprd/rlmax_ewde_quo
+    if(     rlmax_quo>0.0)      rlmax_fac = 1.0_jprd/     rlmax_quo
+    if(rlmax_nsde_quo>0.0) rlmax_nsde_fac = 1.0_jprd/rlmax_nsde_quo
+    if(rlmax_ewde_quo>0.0) rlmax_ewde_fac = 1.0_jprd/rlmax_ewde_quo
     rlmax_errors(1) = maxval(abs(zreel(:,1,:)- zsph_analytic(:,:)))*rlmax_fac
     rlmax_errors(2) = maxval(abs( zgp2(:,1,:)- zsph_analytic(:,:)))*rlmax_fac
     do j=1,nflevg
@@ -635,7 +636,7 @@ module analytic_solutions_mod
       end do
     end do
     if(lwrite_errors) then
-      write(33342,'(i4,i4,i4," ┃",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3)') nzonal,ntotal,jstep, &
+      write(33342,'(i4,i4,i4,L1" ┃",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3)') nzonal,ntotal,jstep,limag, &
       & rlmax_errors(1), &
       & rlmax_errors(2), &
       & rlmax_errors(3), &
@@ -655,11 +656,12 @@ module analytic_solutions_mod
       lpassed_ewde(i) = (rlmax_errors_ewde(i) < rtolerance)
     end do
 
-    lpassed_all = (maxval(rlmax_errors) < rtolerance) .and. (maxval(rlmax_errors_nsde) < rtolerance) .and. (maxval(rlmax_errors_ewde) < rtolerance)
-  
+    rlmax_error = max(maxval(rlmax_errors), maxval(rlmax_errors_nsde), maxval(rlmax_errors_ewde))
+    lpassed_all = rlmax_error < rtolerance
+
     if(.not. lpassed_all) then
       if(lwrite_errors) then
-        write(33343,'("m=",i4," n=",i4," jstep=",i4)')nzonal,ntotal,jstep
+        write(33343,'("m=",i4," n=",i4," jstep=",i4," imag=",L1)')nzonal,ntotal,jstep,limag
         write(33343,'("                     ┃                                                        │                 north-south derivatives                │                 east-west derivatives                ")')
         write(33343,'("     lat/°     lon/° ┃ analytical        pgp       pgp2      pgp3a  max-error │ analytical        pgp       pgp2      pgp3a  max-error │ analytical        pgp       pgp2      pgp3a  max-error ")')
         write(33343,'("━━━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
@@ -691,17 +693,17 @@ module analytic_solutions_mod
       if(sum(abs(int(not(lpassed))))+sum(abs(int(not(lpassed_nsde))))+sum(abs(int(not(lpassed_ewde)))) == 3*ntests) then
         write(nout,'("Error: all tests (fields and derivatives) fail for m=",i4," n=",i4)')nzonal,ntotal
       else if((sum(abs(int(not(lpassed)))) == ntests) .and. (sum(abs(int(not(lpassed_nsde))))+sum(abs(int(not(lpassed_ewde)))) == 0)) then
-        write(nout,'("Error: all derivates are correct but all fields zreel, zgp2 and zgp3a are wrong for m=",i4," n=",i4)')nzonal,ntotal
+        write(nout,'("Error: all derivatives are correct but all fields zreel, zgp2 and zgp3a are wrong for m=",i4," n=",i4)')nzonal,ntotal
       else if((sum(abs(int(not(lpassed)))) == 0) .and. (sum(abs(int(not(lpassed_nsde))))+sum(abs(int(not(lpassed_ewde)))) == 2*ntests)) then
         write(nout,'("Error: all fields zreel, zgp2 and zgp3a are correct but all derivatives are wrong for m=",i4," n=",i4)')nzonal,ntotal
       else if((sum(abs(int(not(lpassed)))) == 0) .and. (sum(abs(int(not(lpassed_nsde)))) == ntests) .and. (sum(abs(int(not(lpassed_ewde)))) == 0)) then
-        write(nout,'("Error: all fields and east-west derivates are correct but all north-south derivatives are wrong for m=",i4," n=",i4)')nzonal,ntotal
+        write(nout,'("Error: all fields and east-west derivatives are correct but all north-south derivatives are wrong for m=",i4," n=",i4)')nzonal,ntotal
       else if(lpassed(1) .and. lpassed_nsde(1) .and. lpassed_ewde(1) .and. (sum(abs(int(not(lpassed(2:)))))+sum(abs(int(not(lpassed_nsde(2:)))))+sum(abs(int(not(lpassed_ewde(2:))))) == 3*(ntests-1))) then
         write(nout,'("Error: first invtrans is correct but all values are wrong in second invtrans call for m=",i4," n=",i4)')nzonal,ntotal
       else
-        if(sum(abs(int(not(lpassed))))>0) write(nout,'("Error: "i3," fields are wrong for m=",i4," n=",i4)')sum(abs(int(not(lpassed)))),nzonal,ntotal
-        if(sum(abs(int(not(lpassed_nsde))))>0) write(nout,'("Error: "i3," north-south derivatives are wrong for m=",i4," n=",i4)')sum(abs(int(not(lpassed_nsde)))),nzonal,ntotal
-        if(sum(abs(int(not(lpassed_ewde))))>0) write(nout,'("Error: "i3," east-west are wrong for m=",i4," n=",i4)')sum(abs(int(not(lpassed_ewde)))),nzonal,ntotal
+        if(sum(abs(int(not(lpassed))))>0) write(nout,'("Error: "i3," fields out of ",i4," are wrong for m=",i4," n=",i4)')sum(abs(int(not(lpassed)))),ntests,nzonal,ntotal
+        if(sum(abs(int(not(lpassed_nsde))))>0) write(nout,'("Error: "i3," north-south derivatives out of ",i4," are wrong for m=",i4," n=",i4)')sum(abs(int(not(lpassed_nsde)))),ntests,nzonal,ntotal
+        if(sum(abs(int(not(lpassed_ewde))))>0) write(nout,'("Error: "i3," east-west derivatives out of ",i4," are wrong for m=",i4," n=",i4)')sum(abs(int(not(lpassed_ewde)))),ntests,nzonal,ntotal
       end if
       call flush(nout)
       stop
@@ -711,7 +713,7 @@ module analytic_solutions_mod
   
   !===================================================================================================
 
-  function check_sp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, nindex, zspsc2, zspsc2b, zspsc3a, nout) result(lpassed_all)
+  function check_sp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, nindex, limag, zspsc2, zspsc2b, zspsc3a, nout) result(rlmax_error)
 
     use parkind1, only: jprb
 
@@ -720,7 +722,9 @@ module analytic_solutions_mod
     real(kind=jprd), intent(in) :: rtolerance ! jprb would be enough
     logical, intent(in) :: lwrite_errors
     integer(kind=jpim), intent(in) :: jstep, nzonal, ntotal, nflevg, nfld, nindex
+    logical, intent(in) :: limag
     real(kind=jprd), intent(in) :: zspsc2(:,:), zspsc2b(:,:), zspsc3a(:,:,:) ! should be kind jprb
+    real(kind=jprd), intent(out) :: rlmax_error
     real(kind=jprd) :: rlmax_error_zspsc2, rlmax_error_zspsc2b, rlmax_error_zspsc3a
     integer(kind=jpim) :: nout
     logical :: lpassed_zspsc2, lpassed_zspsc2b, lpassed_zspsc3a, lpassed_all
@@ -735,12 +739,13 @@ module analytic_solutions_mod
       rlmax_error_zspsc3a = maxval(abs(zspsc3a(:,:,:)))
     end if
 
+    rlmax_error = max(rlmax_error_zspsc2, rlmax_error_zspsc2, rlmax_error_zspsc3a)
     lpassed_zspsc2  = (rlmax_error_zspsc2  < rtolerance)
     lpassed_zspsc2b = (rlmax_error_zspsc2b < rtolerance)
     lpassed_zspsc3a = (rlmax_error_zspsc3a < rtolerance)
     lpassed_all = lpassed_zspsc2 .and. lpassed_zspsc2b .and. lpassed_zspsc3a
     if(lwrite_errors) then
-      write(33344,'(i4,i4,i4," ┃",e11.3,e11.3,e11.3)') nzonal,ntotal,jstep, &
+      write(33344,'(i4,i4,i4,L1" ┃",e11.3,e11.3,e11.3)') nzonal,ntotal,jstep,limag, &
       & rlmax_error_zspsc2,  &
       & rlmax_error_zspsc2b, &
       & rlmax_error_zspsc3a
