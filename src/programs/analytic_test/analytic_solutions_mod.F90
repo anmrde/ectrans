@@ -22,7 +22,6 @@ module analytic_solutions_mod
     integer(kind=jpim), dimension(n_regions_ns) :: nfrstlat, nlstlat
     integer(kind=jpim), dimension(ndgl+n_regions_ew-1,n_regions_ew) :: nsta, nonl
     real(kind=jprd) :: zlat, zlon
-    real(kind=jprd) :: rpi = 2.0_jprd*asin(1.0_jprd)
   
     allocate(zmu(ndgl),nlatidxs(nproma,ngpblks),gelam(nproma,ngpblks),gelat(nproma,ngpblks),nmeng(ndgl))
 
@@ -47,7 +46,7 @@ module analytic_solutions_mod
       istlon = nsta(ilat,my_region_ew)
       iendlon = nonl(ilat,my_region_ew)
       do jlon = istlon, iendlon
-        zlon = real(jlon-1,jprd)*2.0_jprd*rpi/real(nloen(jglat),jprd)
+        zlon = real(jlon-1,jprd)*2.0_jprd*z_pi/real(nloen(jglat),jprd)
         gelam(jrof,ibl) = zlon
         gelat(jrof,ibl) = zlat
         nlatidxs(jrof,ibl) = jglat
@@ -526,6 +525,63 @@ module analytic_solutions_mod
   
   !===================================================================================================
   
+  subroutine compute_analytic_uv(nproma, ngpblks, nsmax, ngptot, m, n, kimag, u_analytic, v_analytic)
+  
+    use tpm_constants, only: ra
+
+    implicit none
+  
+    integer(kind=jpim), intent(in) :: nproma, ngpblks, nsmax, ngptot
+    real(kind=jprd), dimension(nproma,ngpblks), intent(out) :: u_analytic, v_analytic
+    integer(kind=jpim), intent(in) :: m, n
+    logical, intent(in) :: kimag
+    real(kind=jprd) :: coeff2, coeff3, r1, r2, r3
+    integer(kind=jpim) :: jkglo, iend, ioff, ibl, jrof
+  
+    coeff2 = sqrt(real((n+1)*(n+1)-m*m,jprd)/real(4.0*(n+1)*(n+1)-1,jprd))
+    coeff3 = sqrt(real(n*n-m*m,jprd)/real(4.0*n*n-1,jprd))
+
+    do jkglo=1,ngptot,nproma
+      iend = min(nproma,ngptot-jkglo+1)
+      ioff = jkglo - 1
+      ibl  = (jkglo-1)/nproma+1
+      do jrof=1,iend
+        if(m<=nmeng(nlatidxs(jrof,ibl))) then
+          if(kimag) then
+            ! kimag = .true.: vorticity and divergence are initialized with 1 in the imaginary part
+            ! of wavenumbers n, m and zero everywhere else => according to Temperton eq. (2.12) and (2.13)
+            ! u gets in this case only a contribution from divergence and v only from vorticity (first terms
+            ! in the equations)
+            r1 = analytic_spherical_harmonic_point( n, m, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(nlatidxs(jrof,ibl), m, n)) / ra
+            u_analytic(jrof,ibl) = r1
+            v_analytic(jrof,ibl) = r1
+          else
+            ! kimag = .false.: vorticity and divergence have only one real entry (which is 1 for m, n) => first term in
+            ! Temperton eq.(2.12) and (2.13) is zero, second term psi_n-1^m contributes for n+1 and
+            ! third term psi_n+1^m for n-1
+            if(n<nsmax+1) then
+              r2 = n * coeff2 * analytic_spherical_harmonic_point( n + 1, m, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(nlatidxs(jrof,ibl), m, n + 1)) / ra
+              u_analytic(jrof,ibl) = r2
+              v_analytic(jrof,ibl) = - r2
+            end if
+            ! Third term in Temperton eq.(2.12) and (2.13):
+            if(n>m) then
+              r3 = (n + 1) * coeff3 * analytic_spherical_harmonic_point( n - 1, m, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(nlatidxs(jrof,ibl), m, n - 1)) / ra
+              u_analytic(jrof,ibl) = u_analytic(jrof,ibl) - r3
+              v_analytic(jrof,ibl) = v_analytic(jrof,ibl) + r3
+            end if
+          end if
+        else
+          u_analytic(jrof,ibl) = 0.0
+          v_analytic(jrof,ibl) = 0.0
+        end if
+      end do
+    end do
+  
+  end subroutine compute_analytic_uv
+  
+  !===================================================================================================
+  
   subroutine check_legendre_polynomials(nsmax, ndgl)
   
     implicit none
@@ -585,7 +641,9 @@ module analytic_solutions_mod
 
   !===================================================================================================
 
-  function check_gp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, limag, zreel, zgp2, zgp3a, zsph_analytic, znsde_analytic, zewde_analytic, nout) result(rlmax_error)
+  function check_gp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, &
+    & limag, zreel, zgp2, zgp3a, zgpuv, zsph_analytic, znsde_analytic, zewde_analytic, &
+    & zu_analytic, zv_analytic, nout) result(rlmax_error)
 
     use parkind1, only: jprb
 
@@ -595,12 +653,12 @@ module analytic_solutions_mod
     logical, intent(in) :: lwrite_errors
     integer(kind=jpim), intent(in) :: jstep, nzonal, ntotal, nflevg, nfld
     logical, intent(in) :: limag
-    real(kind=jprd), intent(in) :: zreel(:,:,:), zgp2(:,:,:), zgp3a(:,:,:,:) ! should be jprb
-    real(kind=jprd), intent(in) :: zsph_analytic(:,:), znsde_analytic(:,:), zewde_analytic(:,:)
+    real(kind=jprd), intent(in) :: zreel(:,:,:), zgp2(:,:,:), zgp3a(:,:,:,:), zgpuv(:,:,:,:) ! should be jprb
+    real(kind=jprd), intent(in) :: zsph_analytic(:,:), znsde_analytic(:,:), zewde_analytic(:,:), zu_analytic(:,:), zv_analytic(:,:)
     real(kind=jprd), intent(out) :: rlmax_error
     integer(kind=jpim) :: nout
-    real(kind=jprd) :: rlmax_quo, rlmax_nsde_quo, rlmax_ewde_quo, rlmax_fac, rlmax_nsde_fac, rlmax_ewde_fac
-    real(kind=jprd) :: rlmax_errors(nflevg*nfld+2), rlmax_errors_nsde(nflevg*nfld+2), rlmax_errors_ewde(nflevg*nfld+2)
+    real(kind=jprd) :: rlmax_quo, rlmax_nsde_quo, rlmax_ewde_quo, rlmax_u_quo, rlmax_v_quo, rlmax_fac, rlmax_nsde_fac, rlmax_ewde_fac, rlmax_u_fac, rlmax_v_fac
+    real(kind=jprd) :: rlmax_errors(nflevg*nfld+2), rlmax_errors_nsde(nflevg*nfld+2), rlmax_errors_ewde(nflevg*nfld+2), rlmax_errors_uv(2*nflevg)
     logical :: lpassed(nflevg*nfld+2), lpassed_nsde(nflevg*nfld+2), lpassed_ewde(nflevg*nfld+2), lpassed_all
     integer :: i, j, ntests
 
@@ -608,12 +666,18 @@ module analytic_solutions_mod
     rlmax_quo = maxval(abs( zsph_analytic(:,:)))
     rlmax_nsde_quo = maxval(abs(znsde_analytic(:,:)))
     rlmax_ewde_quo = maxval(abs(zewde_analytic(:,:)))
+    rlmax_u_quo = maxval(abs(zu_analytic(:,:)))
+    rlmax_v_quo = maxval(abs(zv_analytic(:,:)))
     rlmax_fac = 1.0_jprd
     rlmax_nsde_fac = 1.0_jprd
     rlmax_ewde_fac = 1.0_jprd
+    rlmax_u_fac = 1.0_jprd
+    rlmax_v_fac = 1.0_jprd
     if(     rlmax_quo>0.0)      rlmax_fac = 1.0_jprd/     rlmax_quo
     if(rlmax_nsde_quo>0.0) rlmax_nsde_fac = 1.0_jprd/rlmax_nsde_quo
     if(rlmax_ewde_quo>0.0) rlmax_ewde_fac = 1.0_jprd/rlmax_ewde_quo
+    if(rlmax_u_quo>0.0) rlmax_u_fac = 1.0_jprd/rlmax_u_quo
+    if(rlmax_v_quo>0.0) rlmax_v_fac = 1.0_jprd/rlmax_v_quo
     rlmax_errors(1) = maxval(abs(zreel(:,1,:)- zsph_analytic(:,:)))*rlmax_fac
     rlmax_errors(2) = maxval(abs( zgp2(:,1,:)- zsph_analytic(:,:)))*rlmax_fac
     do j=1,nflevg
@@ -635,8 +699,12 @@ module analytic_solutions_mod
         rlmax_errors_ewde(i*j+2) = maxval(abs(zgp3a(:,j,2*nfld+i,:)-zewde_analytic(:,:)))*rlmax_ewde_fac
       end do
     end do
+    do j=1,nflevg
+      rlmax_errors_uv(2*j-1) = maxval(abs(zgpuv(:,j,1,:) - zu_analytic(:,:)))*rlmax_u_fac
+      rlmax_errors_uv(2*j)   = maxval(abs(zgpuv(:,j,2,:) - zv_analytic(:,:)))*rlmax_v_fac
+    end do
     if(lwrite_errors) then
-      write(33342,'(i4,i4,i4,L1" ┃",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3)') nzonal,ntotal,jstep,limag, &
+      write(33342,'(i4,i4,i4,L1" ┃",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3," │",e11.3,e11.3)') nzonal,ntotal,jstep,limag, &
       & rlmax_errors(1), &
       & rlmax_errors(2), &
       & rlmax_errors(3), &
@@ -645,7 +713,9 @@ module analytic_solutions_mod
       & rlmax_errors_nsde(3), &
       & rlmax_errors_ewde(1), &
       & rlmax_errors_ewde(2), &
-      & rlmax_errors_ewde(3)
+      & rlmax_errors_ewde(3), &
+      & rlmax_errors_uv(1), &
+      & rlmax_errors_uv(2)
   !   & sqrt(sum((zgp3a(:,1,3,:)-zewde_analytic(:,:))**2)/ngptot)*lmaxewde_fac
       call flush(33342)
     end if
