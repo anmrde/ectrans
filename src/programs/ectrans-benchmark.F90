@@ -203,6 +203,9 @@ logical :: luse_mpi = .true.
 
 character(len=16) :: cgrid = ''
 
+integer(kind=jpim) :: m, n, nindex
+logical :: li
+
 !===================================================================================================
 
 #include "setup_trans0.h"
@@ -225,6 +228,9 @@ call get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, lscder
 if (cgrid == '') cgrid = cubic_octahedral_gaussian_grid(nsmax)
 call parse_grid(cgrid, ndgl, nloen)
 nflevg = nlev
+m = nsmax
+n = nsmax
+li = .false.
 
 !===================================================================================================
 
@@ -462,7 +468,7 @@ nullify(zspsc3a)
 allocate(sp3d(nflevl,nspec2,2+nfld))
 allocate(zspsc2(1,nspec2))
 
-call initialize_spectral_arrays(nsmax, zspsc2, sp3d)
+call initialize_spectral_arrays(nsmax, zspsc2, sp3d, m, n, li, nindex)
 
 ! Point convenience variables to storage variable sp3d
 zspvor  => sp3d(:,:,1)
@@ -680,6 +686,10 @@ do jstep = 1, iters
       & kvsetsc2=ivsetsc,                   &
       & kvsetsc3a=ivset)
   endif
+  if(nindex>0) then
+    write(43344,'(e11.3)')zspsc2(1,nindex+1)
+    call flush(43344)
+  end if
   call gstats(5,1)
   ztstep2(jstep) = (timef() - ztstep2(jstep))/1000.0_jprd
 
@@ -1228,48 +1238,23 @@ end subroutine print_help
 
 !===================================================================================================
 
-subroutine initialize_spectral_arrays(nsmax, zsp, sp3d)
+subroutine initialize_spectral_arrays(nsmax, zsp, sp3d, kzonal, ktotal, kimag, kindex)
 
-  integer,         intent(in)    :: nsmax       ! Spectral truncation
-  real(kind=jprb), intent(inout) :: zsp(:,:)    ! Surface pressure
-  real(kind=jprb), intent(inout) :: sp3d(:,:,:) ! 3D fields
+  integer,            intent(in)    :: nsmax       ! Spectral truncation
+  real(kind=jprb),    intent(inout) :: zsp(:,:)    ! Surface pressure
+  real(kind=jprb),    intent(inout) :: sp3d(:,:,:) ! 3D fields
+  integer,            intent(in)    :: kzonal      ! Zonal wavenumber
+  integer,            intent(in)    :: ktotal      ! Total wavenumber
+  logical,            intent(in)    :: kimag       ! test imaginary part
+  integer(kind=jpim), intent(out)   :: kindex      ! return index that was set to 1
 
   integer(kind=jpim) :: nflevl
   integer(kind=jpim) :: nfield
 
   integer :: i, j
 
-  nflevl = size(sp3d, 1)
-  nfield = size(sp3d, 3)
-
-  ! First initialize surface pressure
-  call initialize_2d_spectral_field(nsmax, zsp(1,:))
-
-  ! Then initialize all of the 3D fields
-  do i = 1, nflevl
-    do j = 1, nfield
-      call initialize_2d_spectral_field(nsmax, sp3d(i,:,j))
-    end do
-  end do
-
-end subroutine initialize_spectral_arrays
-
-!===================================================================================================
-
-subroutine initialize_2d_spectral_field(nsmax, field)
-
-  integer,         intent(in)    :: nsmax    ! Spectral truncation
-  real(kind=jprb), intent(inout) :: field(:) ! Field to initialize
-
-  integer :: i, index, num_my_zon_wns
+  integer :: index, num_my_zon_wns
   integer, allocatable :: my_zon_wns(:), nasm0(:)
-
-  ! Choose a spherical harmonic to initialize arrays
-  integer :: m_num = 4  ! Zonal wavenumber
-  integer :: l_num = 19  ! Total wavenumber
-
-  ! First initialise all spectral coefficients to zero
-  field(:) = 0.0
 
   ! Get zonal wavenumbers this rank is responsible for
   call trans_inq(knump=num_my_zon_wns)
@@ -1277,16 +1262,49 @@ subroutine initialize_2d_spectral_field(nsmax, field)
   call trans_inq(kmyms=my_zon_wns)
 
   ! If rank is responsible for the chosen zonal wavenumber...
-  if (any(my_zon_wns == m_num) ) then
+  if (any(my_zon_wns == kzonal) ) then
     ! Get array of spectral array addresses (this maps (m, n=m) to array index)
     allocate(nasm0(0:nsmax))
     call trans_inq(kasm0=nasm0)
 
     ! Find out local array index of chosen spherical harmonic
-    index = nasm0(m_num) + 2 * (l_num - m_num) + 1
+    index = nasm0(kzonal) + 2 * (ktotal - kzonal)
+    if(kimag) index = index + 1
 
+    kindex = index
+  else
+    kindex = -1
+  end if
+
+  nflevl = size(sp3d, 1)
+  nfield = size(sp3d, 3)
+
+  ! First initialize surface pressure
+  call initialize_2d_spectral_field(zsp(1,:), kindex)
+
+  ! Then initialize all of the 3D fields
+  do i = 1, nflevl
+    do j = 1, nfield
+      call initialize_2d_spectral_field(sp3d(i,:,j), kindex)
+    end do
+  end do
+
+end subroutine initialize_spectral_arrays
+
+!===================================================================================================
+
+subroutine initialize_2d_spectral_field(field, kindex)
+
+  real(kind=jprb), intent(inout) :: field(:) ! Field to initialize
+  integer,         intent(out)   :: kindex   ! return index that is set to one for testing result
+
+  ! First initialise all spectral coefficients to zero
+  field(:) = 0.0
+
+  ! If rank is responsible for the chosen zonal wavenumber...
+  if (kindex > 0) then
     ! Set just that element to a constant value
-    field(index) = 1.0
+    field(kindex) = 1.0
   else
     return
   end if

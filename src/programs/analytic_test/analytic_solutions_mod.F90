@@ -796,15 +796,27 @@ module analytic_solutions_mod
     real(kind=jprd), intent(in) :: zspsc2(:,:), zspsc2b(:,:), zspsc3a(:,:,:) ! should be kind jprb
     real(kind=jprd), intent(out) :: rlmax_error
     real(kind=jprd) :: rlmax_error_zspsc2, rlmax_error_zspsc2b, rlmax_error_zspsc3a
-    integer(kind=jpim) :: nout
+    integer(kind=jpim) :: nout, index_max, j
+    real(kind=jprd), allocatable :: zindex(:)
+
     logical :: lpassed_zspsc2, lpassed_zspsc2b, lpassed_zspsc3a, lpassed_all
 
-    if(nindex > 0) then
-      rlmax_error_zspsc2  = max(maxval(abs( zspsc2(:,1:nindex-1  ))),maxval(abs( zspsc2(:,nindex)  -1.0_jprd)),maxval(abs( zspsc2(:,nindex+1:  ))))
+    allocate(zindex(size(zspsc2,2)))
+    zindex = 0.0
+    if(nindex>0) zindex(nindex) = 1.0
+    rlmax_error_zspsc2 = 0.0
+    do j = 1,size(zspsc2,2)
+      if(abs(zspsc2(1,j)-zindex(j))>rlmax_error_zspsc2) then
+        rlmax_error_zspsc2 = abs(zspsc2(1,j)-zindex(j))
+        index_max = j
+      end if
+    end do
+    if(nindex>0) then
+      !rlmax_error_zspsc2  = max(maxval(abs( zspsc2(:,1:nindex-1  ))),maxval(abs( zspsc2(:,nindex)  -1.0_jprd)),maxval(abs( zspsc2(:,nindex+1:  ))))
       rlmax_error_zspsc2b = max(maxval(abs(zspsc2b(:,1:nindex-1  ))),maxval(abs(zspsc2b(:,nindex)  -1.0_jprd)),maxval(abs(zspsc2b(:,nindex+1:  ))))
       rlmax_error_zspsc3a = max(maxval(abs(zspsc3a(:,1:nindex-1,:))),maxval(abs(zspsc3a(:,nindex,:)-1.0_jprd)),maxval(abs(zspsc3a(:,nindex+1:,:))))
     else
-      rlmax_error_zspsc2  = maxval(abs( zspsc2(:,:  )))
+      !rlmax_error_zspsc2  = maxval(abs( zspsc2(:,:  )))
       rlmax_error_zspsc2b = maxval(abs(zspsc2b(:,:  )))
       rlmax_error_zspsc3a = maxval(abs(zspsc3a(:,:,:)))
     end if
@@ -815,10 +827,11 @@ module analytic_solutions_mod
     lpassed_zspsc3a = (rlmax_error_zspsc3a < rtolerance)
     lpassed_all = lpassed_zspsc2 .and. lpassed_zspsc2b .and. lpassed_zspsc3a
     if(lwrite_errors) then
-      write(33344,'(i4,i4,i4,L1" ┃",e11.3,e11.3,e11.3)') nzonal,ntotal,jstep,limag, &
+      write(33344,'(i4,i4,i4,L1," ┃",e11.3,e11.3,e11.3,i8,i8)') nzonal,ntotal,jstep,limag, &
       & rlmax_error_zspsc2,  &
       & rlmax_error_zspsc2b, &
-      & rlmax_error_zspsc3a
+      & rlmax_error_zspsc3a, &
+      & nindex, index_max
       call flush(33344)
     end if
     if(.not. lpassed_all) then
