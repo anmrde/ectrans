@@ -154,7 +154,9 @@ integer(kind=jpim) :: nproc ! Number of procs
 integer(kind=jpim) :: nthread
 integer(kind=jpim) :: nprgpns ! Grid-point decomp
 integer(kind=jpim) :: nprgpew ! Grid-point decomp
+integer(kind=jpim) :: nprtrv = 1 ! Spectral decomp
 integer(kind=jpim) :: nprtrv = 0 ! Spectral decomp
+integer(kind=jpim) :: nprtrv = 1 ! Spectral decomp
 integer(kind=jpim) :: nprtrw = 0 ! Spectral decomp
 integer(kind=jpim) :: nspecresmin = 80 ! Minimum spectral resolution, for controlling nprtrw
 integer(kind=jpim) :: mysetv
@@ -1261,7 +1263,7 @@ subroutine initialize_spectral_arrays(nsmax, zsp, sp3d, kzonal, ktotal, kimag, k
   allocate(my_zon_wns(num_my_zon_wns))
   call trans_inq(kmyms=my_zon_wns)
 
-  ! If rank is responsible for the chosen zonal wavenumber...
+! If rank is responsible for the chosen zonal wavenumber...
   if (any(my_zon_wns == kzonal) ) then
     ! Get array of spectral array addresses (this maps (m, n=m) to array index)
     allocate(nasm0(0:nsmax))
