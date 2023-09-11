@@ -92,6 +92,7 @@ real(kind=jprd), allocatable :: ztstep(:), ztstep1(:), ztstep2(:)
 real(kind=jprb), allocatable :: znormsp(:), znormsp1(:), znormdiv(:), znormdiv1(:)
 real(kind=jprb), allocatable :: znormvor(:), znormvor1(:), znormt(:), znormt1(:)
 real(kind=jprd) :: zaveave(0:jpmaxstat)
+real(kind=jprd) :: zl2error, zlmaxerror
 
 ! Grid-point space data structures
 real(kind=jprb), allocatable, target :: zgmv   (:,:,:,:) ! Multilevel fields at t and t-dt
@@ -105,7 +106,7 @@ real(kind=jprb), allocatable, target :: sp3d(:,:,:)
 real(kind=jprb), pointer :: zspvor(:,:) => null()
 real(kind=jprb), pointer :: zspdiv(:,:) => null()
 real(kind=jprb), pointer :: zspsc3a(:,:,:) => null()
-real(kind=jprb), allocatable :: zspsc2(:,:)
+real(kind=jprb), allocatable :: zspsc2(:,:), zspsc2ini(:,:)
 
 logical :: lstack = .false. ! Output stack info
 logical :: luserpnm = .false.
@@ -468,9 +469,10 @@ nullify(zspvor)
 nullify(zspdiv)
 nullify(zspsc3a)
 allocate(sp3d(nflevl,nspec2,2+nfld))
-allocate(zspsc2(1,nspec2))
+allocate(zspsc2(1,nspec2), zspsc2ini(1,nspec2))
 
-call initialize_spectral_arrays(nsmax, zspsc2, sp3d, m, n, li, nindex)
+call initialize_spectral_arrays(nsmax, zspsc2ini, sp3d, m, n, li, nindex)
+zspsc2 = zspsc2ini
 
 ! Point convenience variables to storage variable sp3d
 zspvor  => sp3d(:,:,1)
@@ -688,9 +690,23 @@ do jstep = 1, iters
       & kvsetsc2=ivsetsc,                   &
       & kvsetsc3a=ivset)
   endif
+  zl2error = sum((zspsc2-zspsc2ini)**2)
+  zlmaxerror = maxval(abs(zspsc2-zspsc2ini))
+  if (luse_mpi) then
+    call mpl_allreduce(zl2error,   'sum', ldreprod=.false.)
+    call mpl_allreduce(zlmaxerror, 'max', ldreprod=.false.)
+  end if
+  zl2error = sqrt(zl2error/(nsmax**2)*2)
+  if(myproc == 1) then
+    write(50000+nsmax,'(i4,e11.3,e11.3)')jstep,zl2error,zlmaxerror
+    call flush(50000+nsmax)
+    write(nout,'(i4,e11.3,e11.3)')jstep,zl2error,zlmaxerror
+    call flush(nout)
+  end if
+  
   if(nindex>0) then
-    write(43344,'(e11.3)')zspsc2(1,nindex+1)
-    call flush(43344)
+    write(40000+nsmax,'(e11.3)')zspsc2(1,nindex+1)
+    call flush(40000+nsmax)
   end if
   call gstats(5,1)
   ztstep2(jstep) = (timef() - ztstep2(jstep))/1000.0_jprd
