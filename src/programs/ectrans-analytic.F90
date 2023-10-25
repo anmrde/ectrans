@@ -233,7 +233,7 @@ luse_mpi = detect_mpirun()
 ! Setup
 call get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, lscders, luvders, &
   & luseflt, nproma, verbosity, ltest_all, lprint_norms, lwrite_errors, nprtrv, nprtrw, ntotal, nzonal, limag, rtolerance)
-if (cgrid == '') cgrid = cubic_octahedral_gaussian_grid(nsmax)
+if (cgrid == '') cgrid = cubic_full_grid(nsmax)!cubic_octahedral_gaussian_grid(nsmax)
 call parse_grid(cgrid, ndgl, nloen)
 nflevg = nlev
 if(nzonal<0) nzonal = nsmax
@@ -379,7 +379,6 @@ call setup_trans0(kout=nout, kerr=nerr, kprintlev=merge(2, 0, verbosity == 1),  
   &               ldeq_regions=leq_regions, prad=zra, ldalloperm=.true.,                      &
   &               ldmpoff=.not.luse_mpi, k_regions_ns=n_regions_ns, k_regions_ew=n_regions_ew)
 
-! IFS spectral fields are dimensioned NFLEVL, Nils !!
 call setup_trans(kflev=nflevl, ksmax=nsmax, kdgl=ndgl, kloen=nloen, ldsplit=.true.,          &
   &                 ldusefftw=lfftw, lduserpnm=luserpnm, ldkeeprpnm=lkeeprpnm, &
   &                 lduseflt=luseflt)
@@ -528,7 +527,7 @@ ilf = 0
 if(nprtrv == mysetv) then
   ilf = 1
 endif
-call init_check_fields(lwrite_errors)
+call init_check_fields(lwrite_errors, nsmax)
 rlmax_error_inv = 0.0
 rlmax_error_dir = 0.0
 
@@ -553,9 +552,11 @@ do n = 0,nsmax
           !=================================================================================================
 
           call compute_analytic_solution(nproma, ngpblks, nsmax, ngptot, m, n, li, zsph_analytic)
-          call compute_analytic_eastwest_derivative(nproma, ngpblks, nsmax, ngptot, m, n, li, zewde_analytic)
-          call compute_analytic_northsouth_derivative(nproma, ngpblks, nsmax, ngptot, m, n, li, znsde_analytic)
-          call compute_analytic_uv(nproma, ngpblks, nsmax, ngptot, m, n, li, zu_analytic, zv_analytic)
+          if (lscders) then
+            call compute_analytic_eastwest_derivative(nproma, ngpblks, nsmax, ngptot, m, n, li, zewde_analytic)
+            call compute_analytic_northsouth_derivative(nproma, ngpblks, nsmax, ngptot, m, n, li, znsde_analytic)
+          end if
+          if (lvordiv) call compute_analytic_uv(nproma, ngpblks, nsmax, ngptot, m, n, li, zu_analytic, zv_analytic)
 
           !=================================================================================================
           ! Loop over multiple iterations (to see how the errors grow over multiple timesteps)
@@ -604,7 +605,7 @@ do n = 0,nsmax
             rlmax_error_inv = max(rlmax_error_inv, check_gp_fields(rtolerance, lwrite_errors, nflevg, &
               & nfld, jstep, m, n, li, real(zreel,kind=jprd), real(zgp2,kind=jprd), &
               & real(zgp3a,kind=jprd), real(zgpuv,kind=jprd), zsph_analytic, znsde_analytic, &
-              & zewde_analytic, zu_analytic, zv_analytic, nout))
+              & zewde_analytic, zu_analytic, zv_analytic, nout, nsmax, luse_mpi, ngptotg, lscders, lvordiv, myproc))
 
             !=================================================================================================
             ! Do direct transform
@@ -636,13 +637,12 @@ do n = 0,nsmax
 
             rlmax_error_dir = max(rlmax_error_dir, check_sp_fields(rtolerance, lwrite_errors, nflevg, &
               & nfld, jstep, m, n, nindex, li, real(zspsc2,kind=jprd), real(zspsc2b,kind=jprd), &
-              & real(zspsc3a,kind=jprd), nout))
-
+              & real(zspsc3a,kind=jprd), nout, luse_mpi, nsmax, myproc))            
           enddo
+          write(nout,'("m=",i4," n=",i4," done")')m,n
         end if
       end if
     end do
-    write(nout,'("m=",i4," n=",i4," done")')m,n
   end do
 end do
 write(nout,'("All tests passed.")')
@@ -823,7 +823,7 @@ subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, 
         stop
       ! Parse verbosity argument
       case('-v')
-        verbosity = 1
+        verbosity = 0
       ! Parse number of iterations argument
       case('-n', '--niter')
         iters = get_int_value('-n', iarg)
@@ -874,6 +874,16 @@ function cubic_octahedral_gaussian_grid(nsmax) result(cgrid)
   character(len=16) :: cgrid
   integer, intent(in) :: nsmax
   write(cgrid,'(a,i0)') 'O',nsmax+1
+
+end function
+
+!===================================================================================================
+
+function cubic_full_grid(nsmax) result(cgrid)
+
+  character(len=16) :: cgrid
+  integer, intent(in) :: nsmax
+  write(cgrid,'(a,i0)') 'F',nsmax+1
 
 end function
 

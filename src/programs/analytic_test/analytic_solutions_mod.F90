@@ -20,7 +20,7 @@ module analytic_solutions_mod
     integer(kind=jpim) :: nptrfloff, my_region_ns, my_region_ew
     integer(kind=jpim) :: jglat, ioff, ilat, istlon, iendlon, jlon, jrof, ibl
     integer(kind=jpim), dimension(n_regions_ns) :: nfrstlat, nlstlat
-    integer(kind=jpim), dimension(ndgl+n_regions_ew-1,n_regions_ew) :: nsta, nonl
+    integer(kind=jpim), dimension(ndgl+n_regions_ns-1,n_regions_ew) :: nsta, nonl
     real(kind=jprd) :: zlat, zlon
   
     allocate(zmu(ndgl),nlatidxs(nproma,ngpblks),gelam(nproma,ngpblks),gelat(nproma,ngpblks),nmeng(ndgl))
@@ -44,7 +44,7 @@ module analytic_solutions_mod
       zlat = asin(zmu(jglat))
       ilat = ilat + 1
       istlon = nsta(ilat,my_region_ew)
-      iendlon = nonl(ilat,my_region_ew)
+      iendlon = istlon - 1 + nonl(ilat,my_region_ew)
       do jlon = istlon, iendlon
         zlon = real(jlon-1,jprd)*2.0_jprd*z_pi/real(nloen(jglat),jprd)
         gelam(jrof,ibl) = zlon
@@ -619,22 +619,24 @@ module analytic_solutions_mod
 
   !===================================================================================================
 
-  subroutine init_check_fields(lwrite_errors)
+  subroutine init_check_fields(lwrite_errors, nsmax)
 
     implicit none
 
     logical, intent(in) :: lwrite_errors
+    integer(kind=jpim), intent(in) :: nsmax
 
     if(lwrite_errors) then
-      write(33342,'("lmax-error in grid point space")')
-      write(33342,'("              ┃           grid point data        │      north-south derivative      │       east-west derivative ")')
-      write(33342,'("   m   n it.  ┃        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a ")')
-      write(33342,'("━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
-      write(33344,'("lmax-error in spectral space")')
-      write(33344,'("   m   n it.  ┃     zspsc2    zspsc2b       zspsc3a ")')
-      write(33344,'("━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
-      call flush(33342)
-      call flush(33344)
+      write(40000+nsmax,'("lmax-error in grid point space")')
+      write(40000+nsmax,'("                 ┃           grid point data        │      north-south derivative      │       east-west derivative       |       wind speed")')
+      write(40000+nsmax,'("   m   n it. im. ┃        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a │          u          v")')
+      write(40000+nsmax,'("━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━")')
+      write(60000+nsmax,'("lmax-error in spectral space")')
+      write(60000+nsmax,'("                 ┃             lmax-error           │             l2 - error           │      location of max    ")')
+      write(60000+nsmax,'("   m   n it. im. ┃     zspsc2    zspsc2b    zspsc3a │     zspsc2    zspsc2b    zspsc3a │ initial index_max  rank")')
+      write(60000+nsmax,'("━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
+      call flush(40000+nsmax)
+      call flush(60000+nsmax)
     end if
     
   end subroutine init_check_fields
@@ -643,9 +645,10 @@ module analytic_solutions_mod
 
   function check_gp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, &
     & limag, zreel, zgp2, zgp3a, zgpuv, zsph_analytic, znsde_analytic, zewde_analytic, &
-    & zu_analytic, zv_analytic, nout) result(rlmax_error)
+    & zu_analytic, zv_analytic, nout, nsmax, luse_mpi, ngptotg, lscders, lvordiv, myproc) result(rlmax_error)
 
     use parkind1, only: jprb
+    use mpl_module
 
     implicit none
 
@@ -656,68 +659,123 @@ module analytic_solutions_mod
     real(kind=jprd), intent(in) :: zreel(:,:,:), zgp2(:,:,:), zgp3a(:,:,:,:), zgpuv(:,:,:,:) ! should be jprb
     real(kind=jprd), intent(in) :: zsph_analytic(:,:), znsde_analytic(:,:), zewde_analytic(:,:), zu_analytic(:,:), zv_analytic(:,:)
     real(kind=jprd), intent(out) :: rlmax_error
-    integer(kind=jpim) :: nout
+    integer(kind=jpim), intent(in) :: nout, nsmax, ngptotg, myproc
+    logical, intent(in) :: luse_mpi, lscders, lvordiv
     real(kind=jprd) :: rlmax_quo, rlmax_nsde_quo, rlmax_ewde_quo, rlmax_u_quo, rlmax_v_quo, rlmax_fac, rlmax_nsde_fac, rlmax_ewde_fac, rlmax_u_fac, rlmax_v_fac
     real(kind=jprd) :: rlmax_errors(nflevg*nfld+2), rlmax_errors_nsde(nflevg*nfld+2), rlmax_errors_ewde(nflevg*nfld+2), rlmax_errors_uv(2*nflevg)
+    real(kind=jprd) :: rl2_errors(nflevg*nfld+2), rl2_errors_nsde(nflevg*nfld+2), rl2_errors_ewde(nflevg*nfld+2), rl2_errors_uv(2*nflevg)
     logical :: lpassed(nflevg*nfld+2), lpassed_nsde(nflevg*nfld+2), lpassed_ewde(nflevg*nfld+2), lpassed_all
     integer :: i, j, ntests
 
     ntests = nflevg*nfld+2
     rlmax_quo = maxval(abs( zsph_analytic(:,:)))
-    rlmax_nsde_quo = maxval(abs(znsde_analytic(:,:)))
-    rlmax_ewde_quo = maxval(abs(zewde_analytic(:,:)))
-    rlmax_u_quo = maxval(abs(zu_analytic(:,:)))
-    rlmax_v_quo = maxval(abs(zv_analytic(:,:)))
     rlmax_fac = 1.0_jprd
-    rlmax_nsde_fac = 1.0_jprd
-    rlmax_ewde_fac = 1.0_jprd
-    rlmax_u_fac = 1.0_jprd
-    rlmax_v_fac = 1.0_jprd
-    if(     rlmax_quo>0.0)      rlmax_fac = 1.0_jprd/     rlmax_quo
-    if(rlmax_nsde_quo>0.0) rlmax_nsde_fac = 1.0_jprd/rlmax_nsde_quo
-    if(rlmax_ewde_quo>0.0) rlmax_ewde_fac = 1.0_jprd/rlmax_ewde_quo
-    if(rlmax_u_quo>0.0) rlmax_u_fac = 1.0_jprd/rlmax_u_quo
-    if(rlmax_v_quo>0.0) rlmax_v_fac = 1.0_jprd/rlmax_v_quo
+    if (luse_mpi) then
+      call mpl_allreduce(rlmax_quo, 'max', ldreprod=.false.)
+    end if
+    if(rlmax_quo>0.0) rlmax_fac = 1.0_jprd/ rlmax_quo
     rlmax_errors(1) = maxval(abs(zreel(:,1,:)- zsph_analytic(:,:)))*rlmax_fac
     rlmax_errors(2) = maxval(abs( zgp2(:,1,:)- zsph_analytic(:,:)))*rlmax_fac
+    rl2_errors(1) = sum((zreel(:,1,:)- zsph_analytic(:,:))**2)
+    rl2_errors(2) = sum(( zgp2(:,1,:)- zsph_analytic(:,:))**2)
     do j=1,nflevg
       do i=1,nfld
         rlmax_errors(i*j+2) = maxval(abs(zgp3a(:,j,i,:)- zsph_analytic(:,:)))*rlmax_fac
+        rl2_errors(i*j+2)   = sum((zgp3a(:,j,i,:)- zsph_analytic(:,:))**2)
       end do
     end do
-    rlmax_errors_nsde(1) = maxval(abs(zreel(:,2,:)-znsde_analytic(:,:)))*rlmax_nsde_fac
-    rlmax_errors_nsde(2) = maxval(abs( zgp2(:,2,:)-znsde_analytic(:,:)))*rlmax_nsde_fac
-    do j=1,nflevg
-      do i=1,nfld
-        rlmax_errors_nsde(i*j+2) = maxval(abs(zgp3a(:,j,nfld+i,:)-znsde_analytic(:,:)))*rlmax_nsde_fac
+    if (luse_mpi) then
+      call mpl_allreduce(rlmax_errors, 'max', ldreprod=.false.)
+      call mpl_allreduce(rl2_errors,   'sum', ldreprod=.false.)
+    end if
+    rl2_errors = sqrt(rl2_errors/ngptotg)
+    rlmax_error = maxval(rlmax_errors)
+    if (lscders) then
+      rlmax_nsde_quo = maxval(abs(znsde_analytic(:,:)))
+      rlmax_ewde_quo = maxval(abs(zewde_analytic(:,:)))
+      rlmax_nsde_fac = 1.0_jprd
+      rlmax_ewde_fac = 1.0_jprd
+      if (luse_mpi) then
+        call mpl_allreduce(rlmax_nsde_quo, 'max', ldreprod=.false.)
+        call mpl_allreduce(rlmax_ewde_quo, 'max', ldreprod=.false.)
+      end if
+      if(rlmax_nsde_quo>0.0) rlmax_nsde_fac = 1.0_jprd/rlmax_nsde_quo
+      if(rlmax_ewde_quo>0.0) rlmax_ewde_fac = 1.0_jprd/rlmax_ewde_quo
+      rlmax_errors_nsde(1) = maxval(abs(zreel(:,2,:)-znsde_analytic(:,:)))*rlmax_nsde_fac
+      rlmax_errors_nsde(2) = maxval(abs( zgp2(:,2,:)-znsde_analytic(:,:)))*rlmax_nsde_fac
+      rl2_errors_nsde(1) = sum((zreel(:,2,:)- znsde_analytic(:,:))**2)
+      rl2_errors_nsde(2) = sum(( zgp2(:,2,:)- znsde_analytic(:,:))**2)
+      do j=1,nflevg
+        do i=1,nfld
+          rlmax_errors_nsde(i*j+2) = maxval(abs(zgp3a(:,j,nfld+i,:)-znsde_analytic(:,:)))*rlmax_nsde_fac
+          rl2_errors_nsde(i*j+2)   = sum((zgp3a(:,j,nfld+i,:)- znsde_analytic(:,:))**2)
+        end do
       end do
-    end do
-    rlmax_errors_ewde(1) = maxval(abs(zreel(:,3,:)-zewde_analytic(:,:)))*rlmax_ewde_fac
-    rlmax_errors_ewde(2) = maxval(abs( zgp2(:,3,:)-zewde_analytic(:,:)))*rlmax_ewde_fac
-    do j=1,nflevg
-      do i=1,nfld
-        rlmax_errors_ewde(i*j+2) = maxval(abs(zgp3a(:,j,2*nfld+i,:)-zewde_analytic(:,:)))*rlmax_ewde_fac
+      rlmax_errors_ewde(1) = maxval(abs(zreel(:,3,:)-zewde_analytic(:,:)))*rlmax_ewde_fac
+      rlmax_errors_ewde(2) = maxval(abs( zgp2(:,3,:)-zewde_analytic(:,:)))*rlmax_ewde_fac
+      rl2_errors_ewde(1) = sum((zreel(:,3,:)- zewde_analytic(:,:))**2)
+      rl2_errors_ewde(2) = sum(( zgp2(:,3,:)- zewde_analytic(:,:))**2)
+      do j=1,nflevg
+        do i=1,nfld
+          rlmax_errors_ewde(i*j+2) = maxval(abs(zgp3a(:,j,2*nfld+i,:)-zewde_analytic(:,:)))*rlmax_ewde_fac
+          rl2_errors_ewde(i*j+2)   = sum((zgp3a(:,j,2*nfld+i,:)- zewde_analytic(:,:))**2)
+        end do
       end do
-    end do
-    do j=1,nflevg
-      rlmax_errors_uv(2*j-1) = maxval(abs(zgpuv(:,j,1,:) - zu_analytic(:,:)))*rlmax_u_fac
-      rlmax_errors_uv(2*j)   = maxval(abs(zgpuv(:,j,2,:) - zv_analytic(:,:)))*rlmax_v_fac
-    end do
-    if(lwrite_errors) then
-      write(33342,'(i4,i4,i4,L1" ┃",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3," │",e11.3,e11.3)') nzonal,ntotal,jstep,limag, &
-      & rlmax_errors(1), &
-      & rlmax_errors(2), &
-      & rlmax_errors(3), &
-      & rlmax_errors_nsde(1), &
-      & rlmax_errors_nsde(2), &
-      & rlmax_errors_nsde(3), &
-      & rlmax_errors_ewde(1), &
-      & rlmax_errors_ewde(2), &
-      & rlmax_errors_ewde(3), &
-      & rlmax_errors_uv(1), &
-      & rlmax_errors_uv(2)
-  !   & sqrt(sum((zgp3a(:,1,3,:)-zewde_analytic(:,:))**2)/ngptot)*lmaxewde_fac
-      call flush(33342)
+      if (luse_mpi) then
+        call mpl_allreduce(rlmax_errors_nsde, 'max', ldreprod=.false.)
+        call mpl_allreduce(rlmax_errors_ewde, 'max', ldreprod=.false.)
+        call mpl_allreduce(rl2_errors_nsde,   'sum', ldreprod=.false.)
+        call mpl_allreduce(rl2_errors_ewde,   'sum', ldreprod=.false.)
+      end if
+      rl2_errors_nsde = sqrt(rl2_errors_nsde/ngptotg)
+      rl2_errors_ewde = sqrt(rl2_errors_ewde/ngptotg)
+      rlmax_error = max(rlmax_error, maxval(rlmax_errors_nsde), maxval(rlmax_errors_ewde))
+    else
+      rlmax_errors_nsde = 0.0
+      rlmax_errors_ewde = 0.0
+    end if
+    if (lvordiv) then
+      rlmax_u_quo = maxval(abs(zu_analytic(:,:)))
+      rlmax_v_quo = maxval(abs(zv_analytic(:,:)))
+      rlmax_u_fac = 1.0_jprd
+      rlmax_v_fac = 1.0_jprd
+      if (luse_mpi) then
+        call mpl_allreduce(rlmax_u_quo, 'max', ldreprod=.false.)
+        call mpl_allreduce(rlmax_v_quo, 'max', ldreprod=.false.)
+      end if
+      if(rlmax_u_quo>0.0) rlmax_u_fac = 1.0_jprd/rlmax_u_quo
+      if(rlmax_v_quo>0.0) rlmax_v_fac = 1.0_jprd/rlmax_v_quo
+      do j=1,nflevg
+        rlmax_errors_uv(2*j-1) = maxval(abs(zgpuv(:,j,1,:) - zu_analytic(:,:)))*rlmax_u_fac
+        rlmax_errors_uv(2*j)   = maxval(abs(zgpuv(:,j,2,:) - zv_analytic(:,:)))*rlmax_v_fac
+        rl2_errors_uv(2*j-1) = sum((zgpuv(:,j,1,:) - zu_analytic(:,:))**2)
+        rl2_errors_uv(2*j)   = sum((zgpuv(:,j,2,:) - zv_analytic(:,:))**2)
+      end do
+      if (luse_mpi) then
+        call mpl_allreduce(rlmax_errors_uv, 'max', ldreprod=.false.)
+        call mpl_allreduce(rl2_errors_uv,   'sum', ldreprod=.false.)
+      end if
+      rl2_errors = sqrt(rl2_errors/ngptotg)
+      !DEBUGGING: the following line shouldn't be commented out!
+      !rlmax_error = max(rlmax_error, maxval(rlmax_errors_uv))
+    else
+      rlmax_errors_uv = 0.0
+    end if
+    if(lwrite_errors .and. myproc == 1) then
+      write(40000+nsmax,'(3i4,L4" ┃",3e11.3," │",3e11.3," │",3e11.3," │",2e11.3)') nzonal,ntotal,jstep,limag, &
+        & rlmax_errors(1), &
+        & rlmax_errors(2), &
+        & rlmax_errors(3), &
+        & rlmax_errors_nsde(1), &
+        & rlmax_errors_nsde(2), &
+        & rlmax_errors_nsde(3), &
+        & rlmax_errors_ewde(1), &
+        & rlmax_errors_ewde(2), &
+        & rlmax_errors_ewde(3), &
+        & rlmax_errors_uv(1), &
+        & rlmax_errors_uv(2)
+    !   & sqrt(sum((zgp3a(:,1,3,:)-zewde_analytic(:,:))**2)/ngptot)*lmaxewde_fac
+      call flush(40000+nsmax)
     end if
 
     do i=1,ntests
@@ -726,23 +784,23 @@ module analytic_solutions_mod
       lpassed_ewde(i) = (rlmax_errors_ewde(i) < rtolerance)
     end do
 
-    rlmax_error = max(maxval(rlmax_errors), maxval(rlmax_errors_nsde), maxval(rlmax_errors_ewde))
     lpassed_all = rlmax_error < rtolerance
 
     if(.not. lpassed_all) then
       if(lwrite_errors) then
-        write(33343,'("m=",i4," n=",i4," jstep=",i4," imag=",L1)')nzonal,ntotal,jstep,limag
-        write(33343,'("                     ┃                                                        │                 north-south derivatives                │                 east-west derivatives                ")')
-        write(33343,'("     lat/°     lon/° ┃ analytical        pgp       pgp2      pgp3a  max-error │ analytical        pgp       pgp2      pgp3a  max-error │ analytical        pgp       pgp2      pgp3a  max-error ")')
-        write(33343,'("━━━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
+        write(50000+myproc,'("myproc=",i4," m=",i4," n=",i4," jstep=",i4," imag=",L1)')myproc,nzonal,ntotal,jstep,limag
+        write(50000+myproc,'("                     ┃                                                        │                 north-south derivatives                │                 east-west derivatives                  │       wind speed component u     │       wind speed component v     ")')
+        write(50000+myproc,'("     lat/°     lon/° ┃ analytical        pgp       pgp2      pgp3a  max-error │ analytical        pgp       pgp2      pgp3a  max-error │ analytical        pgp       pgp2      pgp3a  max-error │ analytical      zgpuv  max-error │ analytical      zgpuv  max-error ")')
+        write(50000+myproc,'("━━━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
         do j=1,ubound(gelat,2)
           do i=1,ubound(gelat,1)
             if(max(abs(zreel(i,1,j)-zsph_analytic(i,j))*rlmax_fac,abs(zgp2(i,1,j)-zsph_analytic(i,j) )*rlmax_fac, &
               & maxval(abs((zgp3a(i,:,1,j)-zsph_analytic(i,j) )))*rlmax_fac, abs(zreel(i,2,j)-znsde_analytic(i,j))*rlmax_nsde_fac, &
               & abs(zgp2(i,2,j)-znsde_analytic(i,j))*rlmax_nsde_fac, maxval(abs((zgp3a(i,:,2,j)-znsde_analytic(i,j))))*rlmax_nsde_fac, &
               & abs(zreel(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, abs(zgp2(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, &
-              & maxval(abs((zgp3a(i,:,3,j)-zewde_analytic(i,j))))*rlmax_ewde_fac) > rtolerance) then
-              write(33343,'(f10.3,f10.3," ┃",e11.3,e11.3,e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3,e11.3,e11.3," │",e11.3,e11.3,e11.3,e11.3,e11.3)') &
+              & maxval(abs((zgp3a(i,:,3,j)-zewde_analytic(i,j))))*rlmax_ewde_fac, maxval(abs(zgpuv(i,:,1,j)-zu_analytic(i,j)))*rlmax_u_fac, &
+              & maxval(abs(zgpuv(i,:,2,j)-zv_analytic(i,j)))*rlmax_v_fac) > rtolerance) then
+              write(50000+myproc,'(2f10.3," ┃",5e11.3," │",5e11.3," │",5e11.3," │",3e11.3," │",3e11.3)') &
                 & gelat(i,  j)*180/z_pi,gelam(i,j)*180/z_pi, &
                 & abs(zsph_analytic(i,j)), abs(zreel(i,1,j)), abs(zgp2(i,1,j)), maxval(abs(zgp3a(i,:,1,j))), &
                 & max(         (zreel(i,  1,j)-zsph_analytic(i,j) )*rlmax_fac, &
@@ -755,7 +813,9 @@ module analytic_solutions_mod
                 & zewde_analytic(i,j), zreel(i,3,j), zgp2(i,3,j), maxval(abs(zgp3a(i,:,3,j))), &
                 & max(           (zreel(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, &
                 &                 (zgp2(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, &
-                &   maxval(abs((zgp3a(i,:,3,j)-zewde_analytic(i,j))))*rlmax_ewde_fac)
+                &   maxval(abs((zgp3a(i,:,3,j)-zewde_analytic(i,j))))*rlmax_ewde_fac), &
+                & zu_analytic(i,j), maxval(abs(zgpuv(i,:,1,j))), maxval(abs(zgpuv(i,:,1,j)-zu_analytic(i,j))*rlmax_u_fac), &
+                & zv_analytic(i,j), maxval(abs(zgpuv(i,:,2,j))), maxval(abs(zgpuv(i,:,2,j)-zv_analytic(i,j))*rlmax_v_fac)
             end if
           end do
         end do
@@ -776,27 +836,31 @@ module analytic_solutions_mod
         if(sum(abs(int(not(lpassed_ewde))))>0) write(nout,'("Error: "i3," east-west derivatives out of ",i4," are wrong for m=",i4," n=",i4)')sum(abs(int(not(lpassed_ewde)))),ntests,nzonal,ntotal
       end if
       call flush(nout)
-      stop
+      stop "error check in grid point space not passed"
     end if
     
   end function check_gp_fields
   
   !===================================================================================================
 
-  function check_sp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, nindex, limag, zspsc2, zspsc2b, zspsc3a, nout) result(rlmax_error)
+  function check_sp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, nindex, limag, zspsc2, &
+    & zspsc2b, zspsc3a, nout, luse_mpi, nsmax, myproc) result(rlmax_error)
 
     use parkind1, only: jprb
+    use mpl_module
 
     implicit none
 
     real(kind=jprd), intent(in) :: rtolerance ! jprb would be enough
     logical, intent(in) :: lwrite_errors
-    integer(kind=jpim), intent(in) :: jstep, nzonal, ntotal, nflevg, nfld, nindex
-    logical, intent(in) :: limag
+    integer(kind=jpim), intent(in) :: jstep, nzonal, ntotal, nflevg, nfld, nindex, nout, nsmax, myproc
+    logical, intent(in) :: limag, luse_mpi
     real(kind=jprd), intent(in) :: zspsc2(:,:), zspsc2b(:,:), zspsc3a(:,:,:) ! should be kind jprb
     real(kind=jprd), intent(out) :: rlmax_error
     real(kind=jprd) :: rlmax_error_zspsc2, rlmax_error_zspsc2b, rlmax_error_zspsc3a
-    integer(kind=jpim) :: nout, index_max, j
+    real(kind=jprd) :: rl2_error_zspsc2, rl2_error_zspsc2b, rl2_error_zspsc3a
+    real(kind=jprd) :: rlmax_error_zspsc2_local
+    integer(kind=jpim) :: index_max, rank_max, nindex_max, j
     real(kind=jprd), allocatable :: zindex(:)
 
     logical :: lpassed_zspsc2, lpassed_zspsc2b, lpassed_zspsc3a, lpassed_all
@@ -805,40 +869,71 @@ module analytic_solutions_mod
     zindex = 0.0
     if(nindex>0) zindex(nindex) = 1.0
     rlmax_error_zspsc2 = 0.0
+    ! checking maximum in a loop to also find the index of the maximum:
     do j = 1,size(zspsc2,2)
       if(abs(zspsc2(1,j)-zindex(j))>rlmax_error_zspsc2) then
         rlmax_error_zspsc2 = abs(zspsc2(1,j)-zindex(j))
         index_max = j
       end if
     end do
+    rl2_error_zspsc2 = sum((zspsc2(1,:)-zindex(:))**2)
+    rlmax_error_zspsc2_local = rlmax_error_zspsc2
     if(nindex>0) then
-      !rlmax_error_zspsc2  = max(maxval(abs( zspsc2(:,1:nindex-1  ))),maxval(abs( zspsc2(:,nindex)  -1.0_jprd)),maxval(abs( zspsc2(:,nindex+1:  ))))
       rlmax_error_zspsc2b = max(maxval(abs(zspsc2b(:,1:nindex-1  ))),maxval(abs(zspsc2b(:,nindex)  -1.0_jprd)),maxval(abs(zspsc2b(:,nindex+1:  ))))
       rlmax_error_zspsc3a = max(maxval(abs(zspsc3a(:,1:nindex-1,:))),maxval(abs(zspsc3a(:,nindex,:)-1.0_jprd)),maxval(abs(zspsc3a(:,nindex+1:,:))))
+      rl2_error_zspsc2b = sum((zspsc2b(:,1:nindex-1  ))**2)+sum((zspsc2b(:,nindex)  -1.0_jprd)**2)+sum((zspsc2b(:,nindex+1:  ))**2)
+      rl2_error_zspsc3a = sum((zspsc3a(:,1:nindex-1,:))**2)+sum((zspsc3a(:,nindex,:)-1.0_jprd)**2)+sum((zspsc3a(:,nindex+1:,:))**2)
     else
-      !rlmax_error_zspsc2  = maxval(abs( zspsc2(:,:  )))
       rlmax_error_zspsc2b = maxval(abs(zspsc2b(:,:  )))
       rlmax_error_zspsc3a = maxval(abs(zspsc3a(:,:,:)))
+      rl2_error_zspsc2b   = sum((zspsc2b(:,:  ))**2)
+      rl2_error_zspsc3a   = sum((zspsc3a(:,:,:))**2)
     end if
-
+    if (luse_mpi) then
+      call mpl_allreduce(rlmax_error_zspsc2 , 'max', ldreprod=.false.)
+      call mpl_allreduce(rlmax_error_zspsc2b, 'max', ldreprod=.false.)
+      call mpl_allreduce(rlmax_error_zspsc3a, 'max', ldreprod=.false.)
+      call mpl_allreduce(rl2_error_zspsc2   , 'sum', ldreprod=.false.)
+      call mpl_allreduce(rl2_error_zspsc2b  , 'sum', ldreprod=.false.)
+      call mpl_allreduce(rl2_error_zspsc3a  , 'sum', ldreprod=.false.)
+      ! find rank and index of maximum error for zspsc2:
+      if(rlmax_error_zspsc2==rlmax_error_zspsc2_local) then
+        rank_max = myproc
+        nindex_max = nindex
+      else
+        rank_max = 0
+        index_max = 0
+        nindex_max = 0
+      end if
+      call mpl_allreduce(rank_max  , 'max', ldreprod=.false.)
+      call mpl_allreduce(index_max , 'max', ldreprod=.false.)
+      call mpl_allreduce(nindex_max , 'max', ldreprod=.false.)
+    end if
+    rl2_error_zspsc2  = rl2_error_zspsc2 /(nsmax**2)*2
+    rl2_error_zspsc2b = rl2_error_zspsc2b/(nsmax**2)*2
+    rl2_error_zspsc3a = rl2_error_zspsc3a/(nsmax**2)*2
+  
     rlmax_error = max(rlmax_error_zspsc2, rlmax_error_zspsc2, rlmax_error_zspsc3a)
     lpassed_zspsc2  = (rlmax_error_zspsc2  < rtolerance)
     lpassed_zspsc2b = (rlmax_error_zspsc2b < rtolerance)
     lpassed_zspsc3a = (rlmax_error_zspsc3a < rtolerance)
     lpassed_all = lpassed_zspsc2 .and. lpassed_zspsc2b .and. lpassed_zspsc3a
-    if(lwrite_errors) then
-      write(33344,'(i4,i4,i4,L1," ┃",e11.3,e11.3,e11.3,i8,i8)') nzonal,ntotal,jstep,limag, &
+    if(lwrite_errors .and. myproc==1) then
+      write(60000+nsmax,'(3i4,L4," ┃",3e11.3," |",3e11.3," |",3i8)') nzonal,ntotal,jstep,limag, &
       & rlmax_error_zspsc2,  &
       & rlmax_error_zspsc2b, &
       & rlmax_error_zspsc3a, &
-      & nindex, index_max
-      call flush(33344)
+      & rl2_error_zspsc2,    &
+      & rl2_error_zspsc2b,   &
+      & rl2_error_zspsc3a,   &
+      & nindex_max, index_max, rank_max
+      call flush(60000+nsmax)
     end if
     if(.not. lpassed_all) then
       if((.not. lpassed_zspsc2) .and. (.not. lpassed_zspsc2b) .and. (.not. lpassed_zspsc3a)) write(nout,'("Error: all spectral fields are wrong for m=",i4," n=",i4)')nzonal,ntotal
       write(nout,'("there must be something wrong in the direct transform")')
       call flush(nout)
-      stop
+      stop "error check in spectral space not passed"
     end if
   end function check_sp_fields
 
