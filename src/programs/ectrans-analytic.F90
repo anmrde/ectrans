@@ -49,7 +49,8 @@ use analytic_solutions_mod, only: analytic_init, analytic_end, buffer_legendre_p
 & buffer_legendre_polynomials_ectrans, check_legendre_polynomials, &
 & compute_analytic_solution, compute_analytic_eastwest_derivative, &
 & compute_analytic_northsouth_derivative, gelam, gelat, init_check_fields, &
-& check_gp_fields, check_sp_fields, compute_analytic_uv
+& close_check_fields, check_gp_fields, check_sp_fields, compute_analytic_uv, &
+& compute_analytic_uv_derivative_ew
 
 implicit none
 
@@ -117,6 +118,8 @@ real(kind=jprb), allocatable :: zreel(:,:,:)
 real(kind=jprd), allocatable :: zsph_analytic(:,:)
 real(kind=jprd), allocatable :: zu_analytic(:,:)
 real(kind=jprd), allocatable :: zv_analytic(:,:)
+real(kind=jprd), allocatable :: zuder_analytic(:,:)
+real(kind=jprd), allocatable :: zvder_analytic(:,:)
 real(kind=jprd), allocatable :: zewde_analytic(:,:)
 real(kind=jprd), allocatable :: znsde_analytic(:,:)
 real(kind=jprd), allocatable :: zsinlats(:)
@@ -469,9 +472,9 @@ if (lvordiv) then
 endif
 if (luvders) then
   jbegin_uder_EW  = jend_uv + 1
-  jend_uder_EW    = jbegin_uder_EW + 1
+  jend_uder_EW    = jbegin_uder_EW
   jbegin_vder_EW  = jend_uder_EW + 1
-  jend_vder_EW    = jbegin_vder_EW + 1
+  jend_vder_EW    = jbegin_vder_EW
 else
   jbegin_uder_EW = jend_uv
   jend_uder_EW   = jend_uv
@@ -507,14 +510,16 @@ zgp2  => zgmvs(:,:,:)
 
 ! Allocate and initialize arrays for analytic solutions
 allocate(zsph_analytic(nproma,ngpblks),zu_analytic(nproma,ngpblks), &
-  & zv_analytic(nproma,ngpblks),zewde_analytic(nproma,ngpblks), &
+  & zv_analytic(nproma,ngpblks),zuder_analytic(nproma,ngpblks), &
+  & zvder_analytic(nproma,ngpblks),zewde_analytic(nproma,ngpblks), &
   & znsde_analytic(nproma,ngpblks),nlatidxs(nproma,ngpblks),zsinlats(ndgl))
 call analytic_init(nproma, ngpblks, ndgl, n_regions_ns, n_regions_ew, nloen)
+call init_check_fields(lwrite_errors, nsmax, myproc, cgrid)
 !call buffer_legendre_polynomials(nsmax)
 !call buffer_legendre_polynomials_belusov(nsmax)
-!call buffer_legendre_polynomials_ectrans(nsmax, ndgl)
+call buffer_legendre_polynomials_ectrans(nsmax, ndgl)
 call buffer_legendre_polynomials_supolf(nsmax)
-!call check_legendre_polynomials(nsmax, ndgl)
+call check_legendre_polynomials(nsmax, ndgl)
 
 if (iters <= 0) call abor1('transform_test:iters <= 0')
 
@@ -527,7 +532,6 @@ ilf = 0
 if(nprtrv == mysetv) then
   ilf = 1
 endif
-call init_check_fields(lwrite_errors, nsmax)
 rlmax_error_inv = 0.0
 rlmax_error_dir = 0.0
 
@@ -557,6 +561,7 @@ do n = 0,nsmax
             call compute_analytic_northsouth_derivative(nproma, ngpblks, nsmax, ngptot, m, n, li, znsde_analytic)
           end if
           if (lvordiv) call compute_analytic_uv(nproma, ngpblks, nsmax, ngptot, m, n, li, zu_analytic, zv_analytic)
+          if (luvders) call compute_analytic_uv_derivative_ew(nproma, ngpblks, nsmax, ngptot, m, n, li, zuder_analytic, zvder_analytic)
 
           !=================================================================================================
           ! Loop over multiple iterations (to see how the errors grow over multiple timesteps)
@@ -605,7 +610,8 @@ do n = 0,nsmax
             rlmax_error_inv = max(rlmax_error_inv, check_gp_fields(rtolerance, lwrite_errors, nflevg, &
               & nfld, jstep, m, n, li, real(zreel,kind=jprd), real(zgp2,kind=jprd), &
               & real(zgp3a,kind=jprd), real(zgpuv,kind=jprd), zsph_analytic, znsde_analytic, &
-              & zewde_analytic, zu_analytic, zv_analytic, nout, nsmax, luse_mpi, ngptotg, lscders, lvordiv, myproc))
+              & zewde_analytic, zu_analytic, zv_analytic, zuder_analytic, zvder_analytic, nout, &
+              & nsmax, luse_mpi, ngptotg, lscders, lvordiv, luvders, myproc))
 
             !=================================================================================================
             ! Do direct transform
@@ -649,6 +655,7 @@ write(nout,'("All tests passed.")')
 write(nout,'("Maximum relative error after invtrans: ",e11.3)')rlmax_error_inv
 write(nout,'("Maximum relative error after dirtrans: ",e11.3)')rlmax_error_dir
 call flush(nout)
+call close_check_fields(lwrite_errors, nsmax, myproc)
 
 !===================================================================================================
 ! Cleanup
