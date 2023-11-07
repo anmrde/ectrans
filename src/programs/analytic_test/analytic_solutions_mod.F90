@@ -535,41 +535,45 @@ module analytic_solutions_mod
     real(kind=jprd), dimension(nproma,ngpblks), intent(out) :: u_analytic, v_analytic
     integer(kind=jpim), intent(in) :: m, n
     logical, intent(in) :: kimag
-    real(kind=jprd) :: coeff2, coeff3, r1, r2, r3
+    real(kind=jprd) :: coeff0, coeff1, coeff2, coeff3, r1, r2, r3
     integer(kind=jpim) :: jkglo, iend, ioff, ibl, jrof
   
-    coeff2 = sqrt(real((n+1)*(n+1)-m*m,jprd)/real(4.0*(n+1)*(n+1)-1,jprd))
-    coeff3 = sqrt(real(n*n-m*m,jprd)/real(4.0*n*n-1,jprd))
+    if (kimag) then
+      coeff0 = 1.0_jprd
+    else
+      coeff0 = -1.0_jprd
+    end if
+    if (n>0) then
+      coeff1 = - real(ra,jprd)*real(ra,jprd)/real(n*(n+1),jprd)
+      coeff2 = sqrt(real((n+1)*(n+1)-m*m,jprd)/real(4.0*(n+1)*(n+1)-1,jprd))
+      coeff3 = sqrt(real(n*n-m*m,jprd)/real(4.0*n*n-1,jprd))
+    else
+      coeff1 = 0.0
+      coeff2 = 0.0
+      coeff3 = 0.0
+    end if
 
     do jkglo=1,ngptot,nproma
       iend = min(nproma,ngptot-jkglo+1)
       ioff = jkglo - 1
       ibl  = (jkglo-1)/nproma+1
       do jrof=1,iend
-        if(m<=nmeng(nlatidxs(jrof,ibl))) then
-          if(kimag) then
-            ! kimag = .true.: vorticity and divergence are initialized with 1 in the imaginary part
-            ! of wavenumbers n, m and zero everywhere else => according to Temperton eq. (2.12) and (2.13)
-            ! u gets in this case only a contribution from divergence and v only from vorticity (first terms
-            ! in the equations)
-            r1 = analytic_spherical_harmonic_point( n, m, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(nlatidxs(jrof,ibl), m, n)) / ra
-            u_analytic(jrof,ibl) = r1
-            v_analytic(jrof,ibl) = r1
-          else
-            ! kimag = .false.: vorticity and divergence have only one real entry (which is 1 for m, n) => first term in
-            ! Temperton eq.(2.12) and (2.13) is zero, second term psi_n-1^m contributes for n+1 and
-            ! third term psi_n+1^m for n-1
-            if(n<nsmax+1) then
-              r2 = n * coeff2 * analytic_spherical_harmonic_point( n + 1, m, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(nlatidxs(jrof,ibl), m, n + 1)) / ra
-              u_analytic(jrof,ibl) = r2
-              v_analytic(jrof,ibl) = - r2
-            end if
-            ! Third term in Temperton eq.(2.12) and (2.13):
-            if(n>m) then
-              r3 = (n + 1) * coeff3 * analytic_spherical_harmonic_point( n - 1, m, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(nlatidxs(jrof,ibl), m, n - 1)) / ra
-              u_analytic(jrof,ibl) = u_analytic(jrof,ibl) - r3
-              v_analytic(jrof,ibl) = v_analytic(jrof,ibl) + r3
-            end if
+        if(m<=nmeng(nlatidxs(jrof,ibl)) .and. n>0) then
+          ! first terms in Temperton eq. (2.12) and (2.13):
+          r1 = - real(m,jprd) * coeff0 * coeff1 * analytic_spherical_harmonic_point( n, m, gelam(jrof,ibl), gelat(jrof,ibl), .not. kimag, legpolys(nlatidxs(jrof,ibl), m, n)) / (ra * cos(gelat(jrof,ibl)))
+          u_analytic(jrof,ibl) = r1
+          v_analytic(jrof,ibl) = r1
+          ! second terms psi_n-1^m in Temperton eq.(2.12) and (2.13) contribute for n+1:
+          if(n<nsmax+1) then
+            r2 = n * coeff1 * coeff2 * analytic_spherical_harmonic_point( n + 1, m, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(nlatidxs(jrof,ibl), m, n + 1)) / (ra * cos(gelat(jrof,ibl)))
+            u_analytic(jrof,ibl) = u_analytic(jrof,ibl) + r2
+            v_analytic(jrof,ibl) = v_analytic(jrof,ibl) - r2
+          end if
+          ! third terms psi_n+1^m in Temperton eq.(2.12) and (2.13) contribute for n-1:
+          if(n>m) then
+            r3 = (n + 1) * coeff1 * coeff3 * analytic_spherical_harmonic_point( n - 1, m, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(nlatidxs(jrof,ibl), m, n - 1)) / (ra * cos(gelat(jrof,ibl)))
+            u_analytic(jrof,ibl) = u_analytic(jrof,ibl) - r3
+            v_analytic(jrof,ibl) = v_analytic(jrof,ibl) + r3
           end if
         else
           u_analytic(jrof,ibl) = 0.0
@@ -756,8 +760,7 @@ module analytic_solutions_mod
         call mpl_allreduce(rl2_errors_uv,   'sum', ldreprod=.false.)
       end if
       rl2_errors = sqrt(rl2_errors/ngptotg)
-      !DEBUGGING: the following line shouldn't be commented out!
-      !rlmax_error = max(rlmax_error, maxval(rlmax_errors_uv))
+      rlmax_error = max(rlmax_error, maxval(rlmax_errors_uv))
     else
       rlmax_errors_uv = 0.0
     end if
@@ -814,8 +817,8 @@ module analytic_solutions_mod
                 & max(           (zreel(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, &
                 &                 (zgp2(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, &
                 &   maxval(abs((zgp3a(i,:,3,j)-zewde_analytic(i,j))))*rlmax_ewde_fac), &
-                & zu_analytic(i,j), maxval(abs(zgpuv(i,:,1,j))), maxval(abs(zgpuv(i,:,1,j)-zu_analytic(i,j))*rlmax_u_fac), &
-                & zv_analytic(i,j), maxval(abs(zgpuv(i,:,2,j))), maxval(abs(zgpuv(i,:,2,j)-zv_analytic(i,j))*rlmax_v_fac)
+                & zu_analytic(i,j), zgpuv(i,1,1,j), maxval(abs(zgpuv(i,:,1,j)-zu_analytic(i,j))*rlmax_u_fac), &
+                & zv_analytic(i,j), zgpuv(i,1,2,j), maxval(abs(zgpuv(i,:,2,j)-zv_analytic(i,j))*rlmax_v_fac) !maxval(abs(zgpuv(i,:,2,j)))
             end if
           end do
         end do

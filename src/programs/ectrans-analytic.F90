@@ -639,7 +639,7 @@ do n = 0,nsmax
               & nfld, jstep, m, n, nindex, li, real(zspsc2,kind=jprd), real(zspsc2b,kind=jprd), &
               & real(zspsc3a,kind=jprd), nout, luse_mpi, nsmax, myproc))            
           enddo
-          write(nout,'("m=",i4," n=",i4," done")')m,n
+          write(nout,'("m=",i4," n=",i4," imag=",l1," done")')m,n,li
         end if
       end if
     end do
