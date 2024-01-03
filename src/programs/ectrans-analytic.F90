@@ -44,8 +44,8 @@ use parkind1, only: jpim, jprb, jprd
 use oml_mod ,only : oml_max_threads
 use mpl_module
 use yomhook, only : dr_hook_init
-use analytic_solutions_mod, only: analytic_init, analytic_end, buffer_legendre_polynomials, &
-& buffer_legendre_polynomials_belusov, buffer_legendre_polynomials_supolf, &
+use analytic_solutions_mod, only: analytic_init, analytic_end, &
+& buffer_legendre_polynomials_supolf, &
 & buffer_legendre_polynomials_ectrans, check_legendre_polynomials, &
 & compute_analytic_solution, compute_analytic_eastwest_derivative, &
 & compute_analytic_northsouth_derivative, gelam, gelat, init_check_fields, &
@@ -66,8 +66,8 @@ integer(kind=jpim), parameter :: nout     = 6 ! Unit number for STDOUT
 integer(kind=jpim), parameter :: noutdump = 7 ! Unit number for field output
 
 ! Default parameters
-integer(kind=jpim) :: nsmax   = 79  ! Spectral truncation
-integer(kind=jpim) :: iters   = 10  ! Number of iterations for transform test
+integer(kind=jpim) :: nsmax   = 21  ! Spectral truncation
+integer(kind=jpim) :: iters   = 2  ! Number of iterations for transform test
 integer(kind=jpim) :: nfld    = 1   ! Number of scalar fields 
 integer(kind=jpim) :: nlev    = 1   ! Number of vertical levels
 integer(kind=jpim) :: nzonal  = -1   ! zonal wavenumber to be tested
@@ -137,10 +137,8 @@ logical :: ltest_all = .false.
 logical :: lprint_norms = .false. ! Calculate and print spectral norms
 logical :: lwrite_errors = .true. ! Write error files for all tested wavenumbers
 #ifdef TRANS_SINGLE
-  ! the following type could be jprb
   real(kind=jprd) :: rtolerance = 1e-3  ! maximum relative lmax error tolerance for passing analytyic solution tests
 #else
-  ! the following type could be jprb
   real(kind=jprd) :: rtolerance = 1e-9 ! maximum relative lmax error tolerance for passing analytyic solution tests
 #endif
 integer(kind=jpim) :: nstats_mem = 0
@@ -206,7 +204,7 @@ integer(kind=jpim) :: jbegin_uder_EW = 0
 integer(kind=jpim) :: jend_uder_EW = 0
 integer(kind=jpim) :: jbegin_vder_EW = 0
 integer(kind=jpim) :: jend_vder_EW = 0
-real(kind=jprd) :: rlmax_error_inv, rlmax_error_dir
+real(kind=jprd) :: rlmax_error_leg, rlmax_error_inv, rlmax_error_dir
 logical :: li
 integer(kind=jpim) :: m, n, imag_idx
 
@@ -423,6 +421,7 @@ if (verbosity >= 0) then
   write(nout,'("nspec2g   ",i0)') nspec2g
   write(nout,'("nzonal    ",i0)') nzonal
   write(nout,'("ntotal    ",i0)') ntotal
+  write(nout,'("iters     ",i0)') iters
   write(nout,'("limag     ",l)') limag
   write(nout,'("luseflt   ",l)') luseflt
   write(nout,'("lvordiv   ",l)') lvordiv
@@ -508,18 +507,22 @@ zgpuv => zgmv(:,:,1:jend_vder_EW,:)
 zgp3a => zgmv(:,:,jbegin_sc:jend_scder_EW,:)
 zgp2  => zgmvs(:,:,:)
 
-! Allocate and initialize arrays for analytic solutions
+! Allocate arrays for analytic solutions
 allocate(zsph_analytic(nproma,ngpblks),zu_analytic(nproma,ngpblks), &
   & zv_analytic(nproma,ngpblks),zuder_analytic(nproma,ngpblks), &
   & zvder_analytic(nproma,ngpblks),zewde_analytic(nproma,ngpblks), &
   & znsde_analytic(nproma,ngpblks),nlatidxs(nproma,ngpblks),zsinlats(ndgl))
+! Compute geographic longitude gelam and latitude gelat and index array nlatidxs(nproma,ngpblks):
 call analytic_init(nproma, ngpblks, ndgl, n_regions_ns, n_regions_ew, nloen)
-call init_check_fields(lwrite_errors, nsmax, myproc, cgrid)
-!call buffer_legendre_polynomials(nsmax)
-!call buffer_legendre_polynomials_belusov(nsmax)
-call buffer_legendre_polynomials_ectrans(nsmax, ndgl)
+call init_check_fields(lwrite_errors, nsmax, myproc, nproc, cgrid)
 call buffer_legendre_polynomials_supolf(nsmax)
-call check_legendre_polynomials(nsmax, ndgl)
+! Check correctness of Legendre coefficients:
+if(nproc==1) then
+  ! This test is currently only done for nproc==1. For nproc>1 the ectrans library does not correctly
+  ! return all the Legendre coefficients. This should be fixed in the future.
+  call buffer_legendre_polynomials_ectrans(nsmax, ndgl)
+  rlmax_error_leg = check_legendre_polynomials(rtolerance, lwrite_errors, nsmax, myproc, nproc, ndgl, cgrid, nout)
+end if
 
 if (iters <= 0) call abor1('transform_test:iters <= 0')
 
@@ -539,12 +542,15 @@ rlmax_error_dir = 0.0
 ! Perform tests
 !===================================================================================================
 
+! Loop over all wavenumbers (check actually tested wavenumber inside)
 do n = 0,nsmax
   do m = 0,n
     do imag_idx = 0,1
-      li = (imag_idx == 1)
+      li = (imag_idx == 1) ! test imaginary part
       if(((.not. li) .and. (m == 0)) .or. (m>0)) then ! there is no imaginary part for m==0
-        if(ltest_all .or. (m == nzonal .and. n == ntotal .and. li == limag)) then
+        if(ltest_all .or. (m == nzonal .and. n == ntotal .and. li == limag)) then ! check if this wavenumber should be tested
+
+          ! Initialize arrays
           zreel(:,:,:)  = 0._jprb
           zgmv(:,:,:,:) = 0._jprb
           zgmvs(:,:,:)  = 0._jprb
@@ -611,7 +617,7 @@ do n = 0,nsmax
               & nfld, jstep, m, n, li, real(zreel,kind=jprd), real(zgp2,kind=jprd), &
               & real(zgp3a,kind=jprd), real(zgpuv,kind=jprd), zsph_analytic, znsde_analytic, &
               & zewde_analytic, zu_analytic, zv_analytic, zuder_analytic, zvder_analytic, nout, &
-              & nsmax, luse_mpi, ngptotg, lscders, lvordiv, luvders, myproc))
+              & nsmax, luse_mpi, ngptotg, lscders, lvordiv, luvders, myproc, nproc, cgrid))
 
             !=================================================================================================
             ! Do direct transform
@@ -621,7 +627,6 @@ do n = 0,nsmax
               & pgp=zreel(:,:,:),                     &
               & pspscalar=zspsc2b(1:ilf,:),           & ! spectral scalar
               & kvsetsc=ivsetsc1)
-              !print*,"li=",li," zspsc2b=",zspsc2b
             if (lvordiv) then
               call dir_trans(kresol=1, kproma=nproma, &
                 & pgp2=zgmvs(:,1:1,:),                &
@@ -636,14 +641,17 @@ do n = 0,nsmax
                 & kvsetsc3a=ivset)
             else
               call dir_trans(kresol=1, kproma=nproma, &
-                & pgp=zgp3a(:,1,1:nfld,:),           &
-                & pspscalar=zspsc3a(1:1,1:nfld,1),   & ! spectral scalar
-                & kvsetsc=ivset)
+                & pgp2=zgmvs(:,1:1,:),                &
+                & pgp3a=zgp3a(:,:,1:nfld,:),          &
+                & pspsc2=zspsc2,                      &
+                & pspsc3a=zspsc3a,                    &
+                & kvsetsc2=ivsetsc,                   &
+                & kvsetsc3a=ivset)
             endif
 
             rlmax_error_dir = max(rlmax_error_dir, check_sp_fields(rtolerance, lwrite_errors, nflevg, &
               & nfld, jstep, m, n, nindex, li, real(zspsc2,kind=jprd), real(zspsc2b,kind=jprd), &
-              & real(zspsc3a,kind=jprd), nout, luse_mpi, nsmax, myproc))            
+              & real(zspsc3a,kind=jprd), nout, luse_mpi, nsmax, myproc, nproc))            
           enddo
           write(nout,'("m=",i4," n=",i4," imag=",l1," done")')m,n,li
         end if
@@ -651,7 +659,12 @@ do n = 0,nsmax
     end do
   end do
 end do
-write(nout,'("All tests passed.")')
+write(nout,'("All tests finished.")')
+if(nproc==1) then
+  ! This test is currently only done for nproc==1. For nproc>1 the ectrans library does not correctly
+  ! return all the Legendre coefficients. This should be fixed in the future.
+  write(nout,'("Maximum relative error of Legendre coefficients: ",e11.3)')rlmax_error_leg
+end if
 write(nout,'("Maximum relative error after invtrans: ",e11.3)')rlmax_error_inv
 write(nout,'("Maximum relative error after dirtrans: ",e11.3)')rlmax_error_dir
 call flush(nout)

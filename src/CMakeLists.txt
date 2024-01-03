@@ -8,8 +8,6 @@
 
 add_subdirectory( trans )
 
-add_subdirectory( ectrans_init_spherical_harmonic )
-
 add_subdirectory( programs )
 if( HAVE_TRANSI )
   add_subdirectory(transi)

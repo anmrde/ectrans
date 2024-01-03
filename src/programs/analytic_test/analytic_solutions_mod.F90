@@ -11,6 +11,13 @@ module analytic_solutions_mod
 
   contains
 
+  !===================================================================================================
+  ! Subroutine analytic_init:
+  ! Compute with the help of trans_inq the geographic longitude gelam and latitude gelat.
+  ! Also create a helper array nlatidxs(nproma,ngpblks) which contains for each blocked point the
+  ! global latitude index. This is used later to retrieve the corresponding Legendre polynomial.
+  !===================================================================================================
+
   subroutine analytic_init(nproma, ngpblks, ndgl, n_regions_ns, n_regions_ew, nloen)
 
     implicit none
@@ -60,8 +67,11 @@ module analytic_solutions_mod
   
   end subroutine analytic_init
 
+  !===================================================================================================  
+  ! Subroutine analytic_end:
+  ! Deallocate the helper arrays used for the analytic solutions.
   !===================================================================================================
-  
+
   subroutine analytic_end()
 
     implicit none
@@ -73,97 +83,11 @@ module analytic_solutions_mod
   end subroutine analytic_end
   
   !===================================================================================================
-  
-  subroutine buffer_legendre_polynomials(nsmax)
-  
-    implicit none
-  
-    integer(kind=jpim), intent(in) :: nsmax
-    real(kind=jprd) :: x
-    integer(kind=jpim) :: n, m, ilat
-  
-    if(allocated(legpolys)) deallocate(legpolys)
-    allocate(legpolys(nfirstlat:nlastlat, 0:nsmax+1, 0:nsmax+1))
-    legpolys = 0.0
-
-    do n = 0,nsmax+1
-      do ilat = nfirstlat, nlastlat
-        x = zmu(ilat)
-        legpolys(ilat, n, n) = (double_factorial(2 * n - 1) * sqrt(1. - x * x) ** n)
-      end do
-    end do
-  
-    do n = 1,nsmax+1
-      do ilat = nfirstlat, nlastlat
-        x = zmu(ilat)
-        legpolys(ilat, n-1, n) = x * (2 * n - 1) * legpolys(ilat, n-1, n-1)
-      end do
-    end do
-  
-    do n = 2,nsmax+1
-      do m = 0,n-2
-        do ilat = nfirstlat, nlastlat
-          x = zmu(ilat)
-          legpolys(ilat, m, n) = (x * (2 * n - 1) * legpolys(ilat, m, n-1) - (n + m - 1) * legpolys(ilat, m, n-2)) / (n - m)
-        end do
-      end do
-    end do
-  
-    do n = 0,nsmax+1
-      do m = 0,n
-        do ilat = nfirstlat, nlastlat
-          legpolys(ilat, m, n) = K(n, m) * legpolys(ilat, m, n)
-        end do
-      end do
-    end do
-  
-    call legendre_polynomials_adjust_reduced_grid(nsmax)
-
-  end subroutine buffer_legendre_polynomials
-  
+  ! Subroutine buffer_legendre_polynomials_supolf:
+  ! Compute Legendre polynomials with the help of supolf_test_mod and store them for all latitudes
+  ! and zonal wavenumbers.
   !===================================================================================================
-  
-  subroutine buffer_legendre_polynomials_belusov(nsmax)
-  
-    use supol_test_mod, only: supol_test
-    use tpm_pol_test, only: ini_pol_test
 
-    implicit none
-  
-    integer(kind=jpim), intent(in) :: nsmax
-    real(kind=jprd), dimension(0:nsmax+1, 0:nsmax+1) :: zfn
-    real(kind=jprd) :: zfnn
-    integer(kind=jpim) :: jn, jgl, iodd
-  
-    if(allocated(legpolys)) deallocate(legpolys)
-    allocate(legpolys(nfirstlat:nlastlat, 0:nsmax+1, 0:nsmax+1))
-    legpolys = 0.0
-
-    zfn(0,0) = 2._jprd
-    do jn = 1,nsmax+1
-      zfnn = zfn(0,0)
-      do jgl = 1,jn
-        zfnn = zfnn * sqrt(1._jprd - 0.25_jprd / real(jgl**2,jprd))
-      end do
-  
-      iodd = mod(jn,2)
-      zfn(jn,jn) = zfnn
-      do jgl = 2,jn-iodd,2
-        zfn(jn,jn-jgl) = zfn(jn,jn-jgl+2) * real((jgl-1)*(2*jn-jgl+2),jprd) / real(jgl*(2*jn-jgl+1),jprd)
-      end do
-    end do
-  
-    call ini_pol_test(nsmax+1)
-    do jgl=nfirstlat, nlastlat
-      call supol_test(nsmax+1, zmu(jgl), zfn, legpolys(jgl,:,:))
-    end do
-  
-    call legendre_polynomials_adjust_reduced_grid(nsmax)
-  
-  end subroutine buffer_legendre_polynomials_belusov
-  
-  !===================================================================================================
-  
   subroutine buffer_legendre_polynomials_supolf(nsmax)
   
     use supolf_test_mod, only: supolf_test
@@ -191,9 +115,15 @@ module analytic_solutions_mod
   end subroutine buffer_legendre_polynomials_supolf
   
   !===================================================================================================
-  
-  ! Using ectrans via trans_inq to retrieve the Legendre polynomials
-  ! Caution: ectrans only returns the Legendre polynomials in single precision!!! (supol and supolf return them in double precision)
+  ! Subroutine buffer_legendre_polynomials_ectrans:
+  ! Using ectrans via trans_inq to retrieve the Legendre polynomials. These are only used to check if
+  ! ectrans is computing the same values like the copied supolf_test_mod. They should not be used to
+  ! compute the analytic solutions since then we would not detect bugs introduced in the computation
+  ! of the Legendre polynomials inside ectrans.
+  ! Caution: ectrans only returns the Legendre polynomials in single precision!!!
+  !          (supolf_test returns them in double precision)
+  !===================================================================================================
+
   subroutine buffer_legendre_polynomials_ectrans(nsmax, ndgl)
   
     use supolf_test_mod, only: supolf_test
@@ -226,6 +156,11 @@ module analytic_solutions_mod
   end subroutine buffer_legendre_polynomials_ectrans
   
   !===================================================================================================
+  ! Subroutine legendre_polynomials_adjust_reduced_grid:
+  ! Set Legendre coefficients to zero for those high wavenumbers which should not be computed for the
+  ! reduced grid. (The reduced number of points along the higher latitudes in the reduced grid cannot
+  ! represent these high wavenumbers!)
+  !===================================================================================================
   
   subroutine legendre_polynomials_adjust_reduced_grid(nsmax)
 
@@ -245,6 +180,11 @@ module analytic_solutions_mod
   end subroutine legendre_polynomials_adjust_reduced_grid
 
   !===================================================================================================
+  ! Subroutine compute_analytic_solution:
+  ! Compute analytic solution for a specific total wavenumber n and zonal wavenumber m by going through
+  ! all points and using the point-wise function analytic_spherical_harmonic_point.
+  ! For kimag==.true. the imaginary part is computed. For kimag==.false. the real part is computed.
+  !===================================================================================================
   
   subroutine compute_analytic_solution(nproma, ngpblks, nsmax, ngptot, kzonal, ktotal, kimag, sph_analytic)
   
@@ -261,20 +201,21 @@ module analytic_solutions_mod
       ioff = jkglo - 1
       ibl  = (jkglo-1)/nproma+1
       do jrof=1,iend
-        !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
-        !print *,"C: result=",sph_analytic(jrof,ibl)
         sph_analytic(jrof,ibl) = analytic_spherical_harmonic_point( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag, legpolys(nlatidxs(jrof,ibl), kzonal, ktotal))
-        !print *,"Fortran: result=",sph_analytic(jrof,ibl)
-        !stop "debugging"
-        !sph_analytic(jrof,ibl) = ectrans_init_spherical_harmonic_hardcoded( ktotal, kzonal, gelam(jrof,ibl), gelat(jrof,ibl), kimag)
       end do
     end do
   
   end subroutine compute_analytic_solution
   
   !===================================================================================================
+  ! Function analytic_spherical_harmonic_point:
+  ! Compute analytic solution for a single point with longitude lon and latitude lat and for a specific
+  ! total wavenumber n and zonal wavenumber m by using the Legendre coefficient legPoly.
+  ! For imag==.true. the imaginary part is computed. For imag==.false. the real part is computed.
+  ! For an example of how to use this function see the subroutine compute_analytic_solution.
+  !===================================================================================================
   
-  function analytic_spherical_harmonic_point(n, m, lon, lat, imag, legpoly) result(pointValue)
+  function analytic_spherical_harmonic_point(n, m, lon, lat, imag, legPoly) result(pointValue)
 
     implicit none
 
@@ -283,7 +224,7 @@ module analytic_solutions_mod
     real(jprd), intent(in), value    :: lon
     real(jprd), intent(in), value    :: lat
     logical, intent(in), value       :: imag
-    real(jprd), intent(in), value    :: legpoly
+    real(jprd), intent(in), value    :: legPoly
     real(jprd) :: pointValue
     real(jprd) :: sinlat, coslat, colat
     integer(jpim) :: abs_m
@@ -296,95 +237,29 @@ module analytic_solutions_mod
       if (imag) then
         pointValue = 0.0
       else
-        pointValue = legpoly
+        pointValue = legPoly
       end if
     end if
   
     if (m > 0) then
       if (imag) then
-          pointValue = (-2 * sin(m * lon) * legpoly)
+          pointValue = (-2 * sin(m * lon) * legPoly)
       else
-          pointValue = (2 * cos(m * lon) * legpoly)
+          pointValue = (2 * cos(m * lon) * legPoly)
       end if
     end if
-  !print*,"Fortran: K=",K(n,m)," P=",P(n, m, sinlat)," result=",pointValue
   end function analytic_spherical_harmonic_point
   
-  function factorial(n) result(fact)
-
-    implicit none
-
-    integer(jpim) :: n, i
-    real(jprd) :: fact
-    if (n < 0) call abor1("factorial of negative number not defined!")
-    !fact = int(gamma(n+1), kind=jpim)
-    fact = 1.0
-    do i = 2,n
-      fact = fact * i
-    end do
-  end function factorial
+  !===================================================================================================
+  ! Function analytic_eastwest_derivative_point:
+  ! Compute analytic solution of the east-west derivative for a single point with longitude lon and 
+  ! latitude lat and for a specific total wavenumber n and zonal wavenumber m by using the Legendre
+  ! coefficient legPoly. For imag==.true. the imaginary part is computed. For imag==.false. the real
+  ! part is computed. For an example of how to use this function see the subroutine
+  ! compute_analytic_eastwest_derivative.
+  !===================================================================================================
   
-  function double_factorial(x) result(fact)
-
-    implicit none
-
-    integer(jpim) :: x, y
-    real(jprd) :: fact
-    y = x
-    if (y == 0 .or. y == -1) then
-      fact = 1
-    else
-      fact = y
-      do while (y > 2)
-        y = y - 2
-        fact = fact * y
-      end do
-    end if
-  end function double_factorial
-  
-  recursive function P(n, m, x) result(legPoly)
-
-    implicit none
-
-    integer(jpim) :: n, m
-    real(jprd) :: x, legPoly
-    ! No recursive calculation needed
-    if (n == m) then
-        legPoly = (double_factorial(2 * m - 1) * sqrt(1. - x * x) ** m)
-    end if
-  
-    if (n == m + 1) then
-      legPoly = x * (2 * m + 1) * P(m, m, x)
-    end if
-  
-    ! Formula 1
-    if (n > m + 1) then
-      legPoly =  (x * (2 * n - 1) * P(n - 1, m, x) - (n + m - 1) * P(n - 2, m, x)) / (n - m)
-    end if
-  end function P
-  
-  ! Pn: associated Legendre polynomials with normalization used in ectrans (see Belousov 1962 p.5, in particular eq.5)
-  function Pn(n, m, x) result(legPolyNorm)
-
-    implicit none
-
-    integer(jpim) :: n, m
-    real(jprd) :: x, legPolyNorm
-  
-    legPolyNorm = K(n, m) * P(n, m, x)
-  
-  end function Pn
-  
-  function K(n, m) result(kFactor)
-
-    implicit none
-
-    integer(jpim) :: n, m
-    real(jprd) :: kFactor
-    kFactor = sqrt(((2 * n + 1) * factorial(n - m)) / (factorial(n + m)))
-  end function K
-  
-  function analytic_eastwest_derivative_point(n, m, lon, lat, imag, legpoly) result(pointValue)
+  function analytic_eastwest_derivative_point(n, m, lon, lat, imag, legPoly) result(pointValue)
 
     use tpm_constants, only: ra
 
@@ -395,15 +270,24 @@ module analytic_solutions_mod
     real(jprd), intent(in), value    :: lon
     real(jprd), intent(in), value    :: lat
     logical, intent(in), value       :: imag
-    real(jprd), intent(in), value    :: legpoly
+    real(jprd), intent(in), value    :: legPoly
     real(jprd) :: pointValue
     if (imag) then
-      pointValue = (- m * analytic_spherical_harmonic_point(n, m, lon, lat, .false., legpoly) / (ra * cos(lat)));
+      pointValue = (- m * analytic_spherical_harmonic_point(n, m, lon, lat, .false., legPoly) / (ra * cos(lat)));
     else
-      pointValue = (m * analytic_spherical_harmonic_point(n, m, lon, lat, .true., legpoly) / (ra * cos(lat)));
+      pointValue = (m * analytic_spherical_harmonic_point(n, m, lon, lat, .true., legPoly) / (ra * cos(lat)));
     end if
   
   end function analytic_eastwest_derivative_point
+  
+  !===================================================================================================
+  ! Function analytic_northsouth_derivative_point:
+  ! Compute analytic solution of the north-south derivative for a single point with longitude lon and 
+  ! latitude lat and for a specific total wavenumber n and zonal wavenumber m by using the Legendre
+  ! coefficients legpolyp1 (for total wavenumber n+1) and legpolym1 (for total wavenumber n-1).
+  ! For imag==.true. the imaginary part is computed. For imag==.false. the real part is computed.
+  ! For an example of how to use this function see the subroutine compute_analytic_northsouth_derivative.
+  !===================================================================================================
   
   function analytic_northsouth_derivative_point(n, m, lon, lat, imag, legpolyp1, legpolym1) result(pointValue)
 
@@ -458,6 +342,12 @@ module analytic_solutions_mod
   end function analytic_northsouth_derivative_point
   
   !===================================================================================================
+  ! Subroutine compute_analytic_eastwest_derivative:
+  ! Compute analytic solution of the east-west derivative for a specific total wavenumber n and zonal
+  ! wavenumber m by going through all points and using the point-wise function
+  ! analytic_eastwest_derivative_point. For kimag==.true. the imaginary part is computed.
+  ! For kimag==.false. the real part is computed.
+  !===================================================================================================
   
   subroutine compute_analytic_eastwest_derivative(nproma, ngpblks, nsmax, ngptot, kzonal, ktotal, kimag, sph_analytic)
   
@@ -480,6 +370,12 @@ module analytic_solutions_mod
   
   end subroutine compute_analytic_eastwest_derivative
   
+  !===================================================================================================
+  ! Subroutine compute_analytic_northsouth_derivative:
+  ! Compute analytic solution of the north-south derivative for a specific total wavenumber n and zonal
+  ! wavenumber m by going through all points and using the point-wise function
+  ! analytic_northsouth_derivative_point. For kimag==.true. the imaginary part is computed.
+  ! For kimag==.false. the real part is computed.
   !===================================================================================================
   
   subroutine compute_analytic_northsouth_derivative(nproma, ngpblks, nsmax, ngptot, kzonal, ktotal, kimag, sph_analytic)
@@ -517,6 +413,13 @@ module analytic_solutions_mod
   
   end subroutine compute_analytic_northsouth_derivative
   
+  !===================================================================================================
+  ! Subroutine compute_analytic_uv:
+  ! Compute analytic solution of the wind speed components u and v for a specific total wavenumber n
+  ! and zonal wavenumber m by going through all points and using the point-wise function
+  ! analytic_spherical_harmonic_point. For kimag==.true. the imaginary part is computed.
+  ! For kimag==.false. the real part is computed. For the maths behind this computation see the paper
+  ! Temperton, 1991, MWR 119 p1303.
   !===================================================================================================
   
   subroutine compute_analytic_uv(nproma, ngpblks, nsmax, ngptot, m, n, kimag, u_analytic, v_analytic)
@@ -579,6 +482,14 @@ module analytic_solutions_mod
   end subroutine compute_analytic_uv
   
   !===================================================================================================
+  ! Subroutine compute_analytic_uv_derivative_ew:
+  ! Compute analytic solution of the east-west derivatives of the wind speed components u and v for a 
+  ! specific total wavenumber n and zonal wavenumber m by going through all points and using the
+  ! point-wise function analytic_eastwest_derivative_point. For kimag==.true. the imaginary part is computed.
+  ! For kimag==.false. the real part is computed. For the maths behind this computation see the paper
+  ! Temperton, 1991, MWR 119 p1303. Main difference compared to the subroutine compute_analytic_uv 
+  ! is the use of analytic_eastwest_derivative_point instead of analytic_spherical_harmonic_point.
+  !===================================================================================================
   
   subroutine compute_analytic_uv_derivative_ew(nproma, ngpblks, nsmax, ngptot, m, n, kimag, uder_analytic, vder_analytic)
   
@@ -640,45 +551,84 @@ module analytic_solutions_mod
   end subroutine compute_analytic_uv_derivative_ew
   
   !===================================================================================================
+  ! Function check_legendre_polynomials:
+  ! Computes the difference between the Legendre coefficients returned by the ectrans library
+  ! with the subroutine buffer_legendre_polynomials_ectrans in the array legpolys_ectrans and
+  ! the array legpolys computed with the subroutine supolf_test by buffer_legendre_polynomials_supolf.
+  ! These arrays need to be called before this function is called! This function returns the maximum
+  ! relative difference between the Legendre coefficients computed with the two code paths. For
+  ! lwrite_errors==.true. it also writes the coefficients where the error exceeds the tolerance to file.
+  ! This function works currently only for nproc==1. For nproc>1 the ectrans library does not correctly
+  ! return all Legendre coefficients.
+  !===================================================================================================
   
-  subroutine check_legendre_polynomials(nsmax, ndgl)
+  function check_legendre_polynomials(rtolerance, lwrite_errors, nsmax, myproc, nproc, ndgl, cgrid, nout) result(rlmax_error)
   
+    use parkind1, only: jprb, jprd
+
     implicit none
   
+    real(kind=jprd), intent(in) :: rtolerance
+    logical, intent(in) :: lwrite_errors
     integer(kind=jpim), intent(in) :: nsmax, ndgl
+    integer(kind=jpim), intent(in) :: myproc, nproc
+    character(len=16), intent(in)  :: cgrid
+    real(kind=jprd), intent(out) :: rlmax_error
+    integer(kind=jpim), intent(in) :: nout
+    real(kind=jprd) :: rlmax_quo, rlmax_fac
+    character(len=100) :: filename
+    character(len=2)  :: precision
     integer(kind=jpim) :: ilat, jm, jn
     logical :: lprint
-  
-  
-    write(33320,'("Legendre coefficients")')
-    write(33320,'("ilat   m   n ┃     supolf    ectrans ")')
-    write(33320,'("━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━┿")')
-    do ilat=nfirstlat, nlastlat
-      if(ilat<ndgl/2) then
-        do jm=0,nsmax
-          do jn=jm,nsmax
-            lprint = .false.
-            !print*,ilat,jm,jn,abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn))
-            if(legpolys(ilat,jm,jn)==legpolys(ilat,jm,jn) .and. legpolys_ectrans(ilat,jm,jn)==legpolys_ectrans(ilat,jm,jn)) then ! just to be sure that there are no nans
-              if(max(abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn)))>0) then
-                if(abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))/max(abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn)))>1E-5) then
+
+    if (myproc == 1) then
+      rlmax_error = 0.0_jprd
+      if(lwrite_errors) then
+        if (jprb == jprd) then
+          precision = 'dp'
+        else
+          precision = 'sp'
+        end if
+        write(filename,'(3a,i0,3a,i0,a)')'errors-',precision,'-legendre_T',nsmax,'_',trim(cgrid),'_nproc',nproc,'.txt'
+        open( 30, file = filename, status='replace')
+        write(30,'("Legendre coefficients")')
+        write(30,'("ilat   m   n ┃     supolf    ectrans      error ")')
+        write(30,'("━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿")')
+      end if
+      rlmax_quo = maxval(abs(legpolys))
+      if(rlmax_quo == 0.0) rlmax_quo = maxval(abs(legpolys_ectrans))
+      rlmax_fac = 1.0_jprd
+      if(rlmax_quo>0.0) rlmax_fac = 1.0_jprd/rlmax_quo
+      do ilat=nfirstlat, nlastlat
+        if(ilat<ndgl/2) then
+          do jm=0,nsmax
+            do jn=jm,nsmax
+              lprint = .false.
+              if(legpolys(ilat,jm,jn)==legpolys(ilat,jm,jn) .and. legpolys_ectrans(ilat,jm,jn)==legpolys_ectrans(ilat,jm,jn)) then ! just to be sure that there are no nans
+                if(abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))*rlmax_fac > rtolerance) then
                   lprint = .true.
                 end if
+                if(lprint .and. lwrite_errors) write(30,'(i4,i4,i4," ┃",e11.3,e11.3,e11.3)') ilat, jm, jn, legpolys(ilat,jm,jn), legpolys_ectrans(ilat,jm,jn),abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))*rlmax_fac
+                rlmax_error = max(rlmax_error, abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))*rlmax_fac)
+              else
+                if(legpolys_ectrans(ilat,jm,jn)==legpolys_ectrans(ilat,jm,jn)) write(nout,'("check_legendre_polynomials: ilat=",i4," jm=",i4," jn=",i4," legpolys_ectrans=",e11.3," Issue with Legendre coefficients computed in analytic_solutions_mod.F90 but will continue.")') ilat, jm, jn, legpolys_ectrans(ilat,jm,jn)
+                if(legpolys(ilat,jm,jn)==legpolys(ilat,jm,jn)) write(nout,'("check_legendre_polynomials: ilat=",i4," jm=",i4," jn=",i4," legpolys=",e11.3," Issue with Legendre coefficients computed in ectrans library but will continue.")') ilat, jm, jn, legpolys(ilat,jm,jn)
+                flush(nout)
               end if
-            else
-              !lprint = .true.
-            end if
-            if(lprint) write(33320,'(i4,i4,i4," ┃",e11.3,e11.3,e11.3,e11.3,e11.3)') ilat, jm, jn, legpolys(ilat,jm,jn), legpolys_ectrans(ilat,jm,jn),abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn)),max(abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn))),abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))/max(abs(legpolys(ilat,jm,jn)),abs(legpolys_ectrans(ilat,jm,jn)))
+            end do
           end do
-        end do
-      end if
-    end do
+        end if
+      end do
+    end if
     
-  end subroutine check_legendre_polynomials
+  end function check_legendre_polynomials
 
   !===================================================================================================
+  ! Subroutine init_check_fields:
+  ! Initialize the files in which the errors are written.
+  !===================================================================================================
 
-  subroutine init_check_fields(lwrite_errors, nsmax, myproc, cgrid)
+  subroutine init_check_fields(lwrite_errors, nsmax, myproc, nproc, cgrid)
 
     use parkind1, only: jprb, jprd
 
@@ -686,7 +636,7 @@ module analytic_solutions_mod
 
     logical, intent(in) :: lwrite_errors
     integer(kind=jpim), intent(in) :: nsmax
-    integer(kind=jpim), intent(in) :: myproc
+    integer(kind=jpim), intent(in) :: myproc, nproc
     character(len=16), intent(in)  :: cgrid
     character(len=100) :: filename
     character(len=2)  :: precision
@@ -697,26 +647,29 @@ module analytic_solutions_mod
       else
         precision = 'sp'
       end if
-      write(filename,'(3a,i0,3a)')'errors-',precision,'-gridpoint_T',nsmax,'_',trim(cgrid),'.txt'
-      open(40000+nsmax, file = filename, status='replace')
-      write(filename,'(3a,i0,3a)')'errors-',precision,'-spectral_T',nsmax,'_',trim(cgrid),'.txt'
-      open(60000+nsmax, file = filename, status='replace')
+      write(filename,'(3a,i0,3a,i0,a)')'errors-',precision,'-gridpoint_T',nsmax,'_',trim(cgrid),'_nproc',nproc,'.txt'
+      open(40, file = filename, status='replace')
+      write(filename,'(3a,i0,3a,i0,a)')'errors-',precision,'-spectral_T',nsmax,'_',trim(cgrid),'_nproc',nproc,'.txt'
+      open(60, file = filename, status='replace')
       if(lwrite_errors) then
-        write(40000+nsmax,'("lmax-error in grid point space")')
-        write(40000+nsmax,'("                 ┃           grid point data        │      north-south derivative      │       east-west derivative       |       wind speed      |  east-west derivative ")')
-        write(40000+nsmax,'("   m   n it. im. ┃        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a │          u          v │          u          v ")')
-        write(40000+nsmax,'("━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━")')
-        write(60000+nsmax,'("lmax-error in spectral space")')
-        write(60000+nsmax,'("                 ┃             lmax-error           │             l2 - error           │      location of max    ")')
-        write(60000+nsmax,'("   m   n it. im. ┃     zspsc2    zspsc2b    zspsc3a │     zspsc2    zspsc2b    zspsc3a │ initial index_max  rank")')
-        write(60000+nsmax,'("━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
-        call flush(40000+nsmax)
-        call flush(60000+nsmax)
+        write(40,'("lmax-error in grid point space")')
+        write(40,'("                 ┃           grid point data        │      north-south derivative      │       east-west derivative       |       wind speed      |  east-west derivative ")')
+        write(40,'("   m   n it. im. ┃        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a │        pgp       pgp2      pgp3a │          u          v │          u          v ")')
+        write(40,'("━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━")')
+        write(60,'("lmax-error in spectral space")')
+        write(60,'("                 ┃             lmax-error           │             l2 - error           │      location of max    ")')
+        write(60,'("   m   n it. im. ┃     zspsc2    zspsc2b    zspsc3a │     zspsc2    zspsc2b    zspsc3a │ initial index_max  rank")')
+        write(60,'("━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━")')
+        call flush(40)
+        call flush(60)
       end if
     end if
     
   end subroutine init_check_fields
 
+  !===================================================================================================
+  ! Subroutine close_check_fields:
+  ! Close the files in which the errors are written.
   !===================================================================================================
 
   subroutine close_check_fields(lwrite_errors, nsmax, myproc)
@@ -728,45 +681,68 @@ module analytic_solutions_mod
     integer(kind=jpim), intent(in) :: myproc
 
     if (myproc == 1) then
-      close(40000+nsmax)
-      close(60000+nsmax)
+      close(40)
+      close(60)
     end if
 
   end subroutine close_check_fields
 
   !===================================================================================================
+  ! Function check_gp_fields:
+  ! Compute the errors in gridpoint space by comparing the analytically computed values in the
+  ! *_analytic variables with the values computed by the ectrans library. This function returns the
+  ! maximum relative error. A summary of the errors is written to file. For lwrite_errors this function
+  ! also writes a file with all the latitudes where the errors exceed the tolerance. An attempt is made
+  ! to analyze in which part of the code the errors originate (written to standard output unit nout).
+  !===================================================================================================
 
   function check_gp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, &
     & limag, zreel, zgp2, zgp3a, zgpuv, zsph_analytic, znsde_analytic, zewde_analytic, &
-    & zu_analytic, zv_analytic, zuder_analytic, zvder_analytic, nout, nsmax, luse_mpi, ngptotg, lscders, lvordiv, luvders, myproc) result(rlmax_error)
+    & zu_analytic, zv_analytic, zuder_analytic, zvder_analytic, nout, nsmax, luse_mpi, ngptotg, lscders, lvordiv, luvders, myproc, nproc, cgrid) result(rlmax_error)
 
-    use parkind1, only: jprb
+    use parkind1, only: jprb, jprd
     use mpl_module
 
     implicit none
 
-    real(kind=jprd), intent(in) :: rtolerance ! jprb would be enough
+    real(kind=jprd), intent(in) :: rtolerance
     logical, intent(in) :: lwrite_errors
     integer(kind=jpim), intent(in) :: jstep, nzonal, ntotal, nflevg, nfld
     logical, intent(in) :: limag
     real(kind=jprd), intent(in) :: zreel(:,:,:), zgp2(:,:,:), zgp3a(:,:,:,:), zgpuv(:,:,:,:) ! should be jprb
     real(kind=jprd), intent(in) :: zsph_analytic(:,:), znsde_analytic(:,:), zewde_analytic(:,:), zu_analytic(:,:), zv_analytic(:,:), zuder_analytic(:,:), zvder_analytic(:,:)
     real(kind=jprd), intent(out) :: rlmax_error
-    integer(kind=jpim), intent(in) :: nout, nsmax, ngptotg, myproc
+    integer(kind=jpim), intent(in) :: nout, nsmax, ngptotg, myproc, nproc
+    character(len=16), intent(in)  :: cgrid
     logical, intent(in) :: luse_mpi, lscders, lvordiv, luvders
     real(kind=jprd) :: rlmax_quo, rlmax_nsde_quo, rlmax_ewde_quo, rlmax_u_quo, rlmax_v_quo, rlmax_uder_quo, rlmax_vder_quo, rlmax_fac, rlmax_nsde_fac, rlmax_ewde_fac, rlmax_u_fac, rlmax_v_fac, rlmax_uder_fac, rlmax_vder_fac
     real(kind=jprd) :: rlmax_errors(nflevg*nfld+2), rlmax_errors_nsde(nflevg*nfld+2), rlmax_errors_ewde(nflevg*nfld+2), rlmax_errors_uv(2*nflevg), rlmax_errors_uvder(2*nflevg)
     real(kind=jprd) :: rl2_errors(nflevg*nfld+2), rl2_errors_nsde(nflevg*nfld+2), rl2_errors_ewde(nflevg*nfld+2), rl2_errors_uv(2*nflevg), rl2_errors_uvder(2*nflevg)
     logical :: lpassed(nflevg*nfld+2), lpassed_nsde(nflevg*nfld+2), lpassed_ewde(nflevg*nfld+2), lpassed_all
     integer :: i, j, ntests
+    character(len=100) :: filename
+    character(len=2)  :: precision
+
+    if (jprb == jprd) then
+      precision = 'dp'
+    else
+      precision = 'sp'
+    end if
 
     ntests = nflevg*nfld+2
+
+    ! --------------------------------------------------------------
+    ! Scalar fields zreel(:,1,:), zpg2(:,1,:) and zgp3a(:,:,1:nfld,:):
+    ! --------------------------------------------------------------
+
+    ! compute chosen normalization factor:
     rlmax_quo = maxval(abs( zsph_analytic(:,:)))
     rlmax_fac = 1.0_jprd
     if (luse_mpi) then
       call mpl_allreduce(rlmax_quo, 'max', ldreprod=.false.)
     end if
     if(rlmax_quo>0.0) rlmax_fac = 1.0_jprd/ rlmax_quo
+    ! compute lmax- and l2-errors:
     rlmax_errors(1) = maxval(abs(zreel(:,1,:)- zsph_analytic(:,:)))*rlmax_fac
     rlmax_errors(2) = maxval(abs( zgp2(:,1,:)- zsph_analytic(:,:)))*rlmax_fac
     rl2_errors(1) = sum((zreel(:,1,:)- zsph_analytic(:,:))**2)
@@ -783,7 +759,13 @@ module analytic_solutions_mod
     end if
     rl2_errors = sqrt(rl2_errors/ngptotg)
     rlmax_error = maxval(rlmax_errors)
+
+    ! --------------------------------------------------------------
+    ! Scalar derivatives zreel(:,2:3,:), zpg2(:,2:3,:) and zgp3a(:,:,nfld:2*nfld,:):
+    ! --------------------------------------------------------------
+
     if (lscders) then
+      ! compute chosen normalization factor:
       rlmax_nsde_quo = maxval(abs(znsde_analytic(:,:)))
       rlmax_ewde_quo = maxval(abs(zewde_analytic(:,:)))
       rlmax_nsde_fac = 1.0_jprd
@@ -794,6 +776,7 @@ module analytic_solutions_mod
       end if
       if(rlmax_nsde_quo>0.0) rlmax_nsde_fac = 1.0_jprd/rlmax_nsde_quo
       if(rlmax_ewde_quo>0.0) rlmax_ewde_fac = 1.0_jprd/rlmax_ewde_quo
+    ! compute lmax- and l2-errors of north-south-derivatives:
       rlmax_errors_nsde(1) = maxval(abs(zreel(:,2,:)-znsde_analytic(:,:)))*rlmax_nsde_fac
       rlmax_errors_nsde(2) = maxval(abs( zgp2(:,2,:)-znsde_analytic(:,:)))*rlmax_nsde_fac
       rl2_errors_nsde(1) = sum((zreel(:,2,:)- znsde_analytic(:,:))**2)
@@ -804,6 +787,7 @@ module analytic_solutions_mod
           rl2_errors_nsde(i*j+2)   = sum((zgp3a(:,j,nfld+i,:)- znsde_analytic(:,:))**2)
         end do
       end do
+    ! compute lmax- and l2-errors of east-west-derivatives:
       rlmax_errors_ewde(1) = maxval(abs(zreel(:,3,:)-zewde_analytic(:,:)))*rlmax_ewde_fac
       rlmax_errors_ewde(2) = maxval(abs( zgp2(:,3,:)-zewde_analytic(:,:)))*rlmax_ewde_fac
       rl2_errors_ewde(1) = sum((zreel(:,3,:)- zewde_analytic(:,:))**2)
@@ -827,7 +811,13 @@ module analytic_solutions_mod
       rlmax_errors_nsde = 0.0
       rlmax_errors_ewde = 0.0
     end if
+
+    ! --------------------------------------------------------------
+    ! Wind speed components zgpuv:
+    ! --------------------------------------------------------------
+
     if (lvordiv) then
+      ! compute chosen normalization factor:
       rlmax_u_quo = maxval(abs(zu_analytic(:,:)))
       rlmax_v_quo = maxval(abs(zv_analytic(:,:)))
       rlmax_u_fac = 1.0_jprd
@@ -838,6 +828,7 @@ module analytic_solutions_mod
       end if
       if(rlmax_u_quo>0.0) rlmax_u_fac = 1.0_jprd/rlmax_u_quo
       if(rlmax_v_quo>0.0) rlmax_v_fac = 1.0_jprd/rlmax_v_quo
+    ! compute lmax- and l2-errors of u and v:
       do j=1,nflevg
         rlmax_errors_uv(2*j-1) = maxval(abs(zgpuv(:,j,1,:) - zu_analytic(:,:)))*rlmax_u_fac
         rlmax_errors_uv(2*j)   = maxval(abs(zgpuv(:,j,2,:) - zv_analytic(:,:)))*rlmax_v_fac
@@ -853,7 +844,13 @@ module analytic_solutions_mod
     else
       rlmax_errors_uv = 0.0
     end if
+
+    ! --------------------------------------------------------------
+    ! East-west derivatives of wind speed components zgpuv:
+    ! --------------------------------------------------------------
+
     if (luvders) then
+      ! compute chosen normalization factor:
       rlmax_uder_quo = maxval(abs(zuder_analytic(:,:)))
       rlmax_vder_quo = maxval(abs(zvder_analytic(:,:)))
       rlmax_uder_fac = 1.0_jprd
@@ -864,6 +861,7 @@ module analytic_solutions_mod
       end if
       if(rlmax_uder_quo>0.0) rlmax_uder_fac = 1.0_jprd/rlmax_uder_quo
       if(rlmax_vder_quo>0.0) rlmax_vder_fac = 1.0_jprd/rlmax_vder_quo
+      ! compute lmax- and l2-errors of u and v east-west derivatives:
       do j=1,nflevg
         rlmax_errors_uvder(2*j-1) = maxval(abs(zgpuv(:,j,3,:) - zuder_analytic(:,:)))*rlmax_uder_fac
         rlmax_errors_uvder(2*j)   = maxval(abs(zgpuv(:,j,4,:) - zvder_analytic(:,:)))*rlmax_vder_fac
@@ -879,8 +877,13 @@ module analytic_solutions_mod
     else
       rlmax_errors_uvder = 0.0
     end if
+
+    ! --------------------------------------------------------------
+    ! Write summary of all errors:
+    ! --------------------------------------------------------------
+   
     if(lwrite_errors .and. myproc == 1) then
-      write(40000+nsmax,'(3i4,L4" ┃",3e11.3," │",3e11.3," │",3e11.3," │",2e11.3," │",2e11.3)') nzonal,ntotal,jstep,limag, &
+      write(40,'(3i4,L4" ┃",3e11.3," │",3e11.3," │",3e11.3," │",2e11.3," │",2e11.3)') nzonal,ntotal,jstep,limag, &
         & rlmax_errors(1), &
         & rlmax_errors(2), &
         & rlmax_errors(3), &
@@ -895,9 +898,13 @@ module analytic_solutions_mod
         & rlmax_errors_uvder(1), &
         & rlmax_errors_uvder(2)
     !   & sqrt(sum((zgp3a(:,1,3,:)-zewde_analytic(:,:))**2)/ngptot)*lmaxewde_fac
-      call flush(40000+nsmax)
+      call flush(40)
     end if
 
+    ! --------------------------------------------------------------
+    ! Write detailed errors where they exceed the tolerance:
+    ! --------------------------------------------------------------
+   
     do i=1,ntests
       lpassed(i) = (rlmax_errors(i) < rtolerance)
       lpassed_nsde(i) = (rlmax_errors_nsde(i) < rtolerance)
@@ -908,12 +915,14 @@ module analytic_solutions_mod
 
     if(.not. lpassed_all) then
       if(lwrite_errors) then
-        write(50000+myproc,'("myproc=",i4," m=",i4," n=",i4," jstep=",i4," imag=",L1)')myproc,nzonal,ntotal,jstep,limag
-        write(50000+myproc,'(a,a)')"                     ┃                                                        │                 north-south derivatives                │", &
+        write(filename,'(3a,i0,3a,i0,a,i0,a,i0,a,i0,a)')'test-failed-',precision,'-gridpoint_T',nsmax,'_',trim(cgrid),'_proc',myproc,'_',nproc,'_n',ntotal,'_m',nzonal,'.txt'
+        open(50, file = filename, status='replace')
+        write(50,'("myproc=",i4," m=",i4," n=",i4," jstep=",i4," imag=",L1)')myproc,nzonal,ntotal,jstep,limag
+        write(50,'(a,a)')"                     ┃                                                        │                 north-south derivatives                │", &
         & "                 east-west derivatives                  │       wind speed component u     │       wind speed component v     │    east-west derivative of u     │    east-west derivative of v     "
-        write(50000+myproc,'(a,a)')"     lat/°     lon/° ┃ analytical        pgp       pgp2      pgp3a  max-error │ analytical        pgp       pgp2      pgp3a  max-error │", &
+        write(50,'(a,a)')"     lat/°     lon/° ┃ analytical        pgp       pgp2      pgp3a  max-error │ analytical        pgp       pgp2      pgp3a  max-error │", &
         & " analytical        pgp       pgp2      pgp3a  max-error │ analytical      zgpuv  max-error │ analytical      zgpuv  max-error │ analytical      zgpuv  max-error │ analytical      zgpuv  max-error "
-        write(50000+myproc,'(a,a)')"━━━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿", &
+        write(50,'(a,a)')"━━━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿", &
         & "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         do j=1,ubound(gelat,2)
           do i=1,ubound(gelat,1)
@@ -923,7 +932,7 @@ module analytic_solutions_mod
               & abs(zreel(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, abs(zgp2(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, &
               & maxval(abs((zgp3a(i,:,3,j)-zewde_analytic(i,j))))*rlmax_ewde_fac, maxval(abs(zgpuv(i,:,1,j)-zu_analytic(i,j)))*rlmax_u_fac, &
               & maxval(abs(zgpuv(i,:,2,j)-zv_analytic(i,j)))*rlmax_v_fac) > rtolerance) then
-              write(50000+myproc,'(2f10.3," ┃",5e11.3," │",5e11.3," │",5e11.3," │",3e11.3," │",3e11.3," │",3e11.3," │",3e11.3)') &
+              write(50,'(2f10.3," ┃",5e11.3," │",5e11.3," │",5e11.3," │",3e11.3," │",3e11.3," │",3e11.3," │",3e11.3)') &
                 & gelat(i,  j)*180/z_pi,gelam(i,j)*180/z_pi, &
                 & abs(zsph_analytic(i,j)), abs(zreel(i,1,j)), abs(zgp2(i,1,j)), maxval(abs(zgp3a(i,:,1,j))), &
                 & max(         (zreel(i,  1,j)-zsph_analytic(i,j) )*rlmax_fac, &
@@ -945,6 +954,7 @@ module analytic_solutions_mod
           end do
         end do
       end if
+      ! Attempt to analyze where the errors originate:
       if(sum(abs(int(not(lpassed))))+sum(abs(int(not(lpassed_nsde))))+sum(abs(int(not(lpassed_ewde)))) == 3*ntests) then
         write(nout,'("Error: all tests (fields and derivatives) fail for m=",i4," n=",i4)')nzonal,ntotal
       else if((sum(abs(int(not(lpassed)))) == ntests) .and. (sum(abs(int(not(lpassed_nsde))))+sum(abs(int(not(lpassed_ewde)))) == 0)) then
@@ -967,18 +977,23 @@ module analytic_solutions_mod
   end function check_gp_fields
   
   !===================================================================================================
+  ! Function check_sp_fields:
+  ! Compute the errors in spectral space by comparing the values computed by the ectrans library with
+  ! the known initial values (which is 1 for index nindex and zero everywhere else). This function
+  ! returns the maximum relative error. A summary of the errors is written to file.
+  !===================================================================================================
 
   function check_sp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, nindex, limag, zspsc2, &
-    & zspsc2b, zspsc3a, nout, luse_mpi, nsmax, myproc) result(rlmax_error)
+    & zspsc2b, zspsc3a, nout, luse_mpi, nsmax, myproc, nproc) result(rlmax_error)
 
     use parkind1, only: jprb
     use mpl_module
 
     implicit none
 
-    real(kind=jprd), intent(in) :: rtolerance ! jprb would be enough
+    real(kind=jprd), intent(in) :: rtolerance
     logical, intent(in) :: lwrite_errors
-    integer(kind=jpim), intent(in) :: jstep, nzonal, ntotal, nflevg, nfld, nindex, nout, nsmax, myproc
+    integer(kind=jpim), intent(in) :: jstep, nzonal, ntotal, nflevg, nfld, nindex, nout, nsmax, myproc, nproc
     logical, intent(in) :: limag, luse_mpi
     real(kind=jprd), intent(in) :: zspsc2(:,:), zspsc2b(:,:), zspsc3a(:,:,:) ! should be kind jprb
     real(kind=jprd), intent(out) :: rlmax_error
@@ -990,19 +1005,25 @@ module analytic_solutions_mod
 
     logical :: lpassed_zspsc2, lpassed_zspsc2b, lpassed_zspsc3a, lpassed_all
 
+    ! all spectral arrays are initialized in the subroutine initialize_spectral_arrays
+    ! in ectrans-analytic.F90 with zero except for one index with the number nindex.
+    ! The index nindex is -1 if the index does not exist on the current MPI process.
+    ! This initial field is constructed here in the array zindex:
     allocate(zindex(size(zspsc2,2)))
     zindex = 0.0
     if(nindex>0) zindex(nindex) = 1.0
     rlmax_error_zspsc2 = 0.0
-    ! checking maximum in a loop to also find the index of the maximum:
+    ! compute lmax-error of zspsc2 in a loop to also find the index of the maximum:
     do j = 1,size(zspsc2,2)
       if(abs(zspsc2(1,j)-zindex(j))>rlmax_error_zspsc2) then
         rlmax_error_zspsc2 = abs(zspsc2(1,j)-zindex(j))
         index_max = j
       end if
     end do
+    ! compute l2-error of zspsc2:
     rl2_error_zspsc2 = sum((zspsc2(1,:)-zindex(:))**2)
     rlmax_error_zspsc2_local = rlmax_error_zspsc2
+    ! compute lmax- and l2-errors for zspsc2b and zspsc3a:
     if(nindex>0) then
       rlmax_error_zspsc2b = max(maxval(abs(zspsc2b(:,1:nindex-1  ))),maxval(abs(zspsc2b(:,nindex)  -1.0_jprd)),maxval(abs(zspsc2b(:,nindex+1:  ))))
       rlmax_error_zspsc3a = max(maxval(abs(zspsc3a(:,1:nindex-1,:))),maxval(abs(zspsc3a(:,nindex,:)-1.0_jprd)),maxval(abs(zspsc3a(:,nindex+1:,:))))
@@ -1021,7 +1042,7 @@ module analytic_solutions_mod
       call mpl_allreduce(rl2_error_zspsc2   , 'sum', ldreprod=.false.)
       call mpl_allreduce(rl2_error_zspsc2b  , 'sum', ldreprod=.false.)
       call mpl_allreduce(rl2_error_zspsc3a  , 'sum', ldreprod=.false.)
-      ! find rank and index of maximum error for zspsc2:
+      ! find MPI rank and index of maximum error for zspsc2:
       if(rlmax_error_zspsc2==rlmax_error_zspsc2_local) then
         rank_max = myproc
         nindex_max = nindex
@@ -1043,8 +1064,9 @@ module analytic_solutions_mod
     lpassed_zspsc2b = (rlmax_error_zspsc2b < rtolerance)
     lpassed_zspsc3a = (rlmax_error_zspsc3a < rtolerance)
     lpassed_all = lpassed_zspsc2 .and. lpassed_zspsc2b .and. lpassed_zspsc3a
+    ! write summary of all errors to file:
     if(lwrite_errors .and. myproc==1) then
-      write(60000+nsmax,'(3i4,L4," ┃",3e11.3," |",3e11.3," |",3i8)') nzonal,ntotal,jstep,limag, &
+      write(60,'(3i4,L4," ┃",3e11.3," |",3e11.3," |",3i8)') nzonal,ntotal,jstep,limag, &
       & rlmax_error_zspsc2,  &
       & rlmax_error_zspsc2b, &
       & rlmax_error_zspsc3a, &
@@ -1052,7 +1074,7 @@ module analytic_solutions_mod
       & rl2_error_zspsc2b,   &
       & rl2_error_zspsc3a,   &
       & nindex_max, index_max, rank_max
-      call flush(60000+nsmax)
+      call flush(60)
     end if
     if(.not. lpassed_all) then
       if((.not. lpassed_zspsc2) .and. (.not. lpassed_zspsc2b) .and. (.not. lpassed_zspsc3a)) write(nout,'("Error: all spectral fields are wrong for m=",i4," n=",i4)')nzonal,ntotal

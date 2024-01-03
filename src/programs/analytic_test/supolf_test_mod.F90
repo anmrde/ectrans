@@ -12,7 +12,12 @@ MODULE SUPOLF_TEST_MOD
 CONTAINS
 SUBROUTINE SUPOLF_TEST(KM,KNSMAX,DDMU,DDPOL,KCHEAP)
 
-!**** *SUPOL * - Routine to compute the Legendre polynomials
+!**** *SUPOLF_TEST * - Copy of the routine supolf to compute associated Legendre polynomials
+! This routine should only be used for testing the correctness of the results produced by ectrans!
+! It is separate from the main supolf code in ectrans to help identify when code changes might affect
+! the correctness of the results by using this version in the testing with analytic solutions!
+
+!**** *SUPOLF * - Routine to compute the Legendre polynomials
 
 !     Purpose.
 !     --------
