@@ -30,13 +30,19 @@ if( HAVE_TOOLS )
 
 endif()
 
-foreach( program ectrans-benchmark ectrans-benchmark-ifs )
+ecbuild_list_add_pattern( LIST analytic_test_files
+                          GLOB
+                                analytic_test/*
+                          QUIET
+                        )
+
+foreach( program ectrans-benchmark ectrans-benchmark-ifs ectrans-analytic )
 
   if ( HAVE_CPU )
     foreach( prec dp sp )
       if( HAVE_${prec} )
         ecbuild_add_executable( TARGET  ${program}-${prec}
-                                SOURCES ${program}.F90
+                                SOURCES ${program}.F90 ${analytic_test_files}
                                 LINKER_LANGUAGE Fortran
                                 LIBS
                                   fiat
@@ -51,7 +57,7 @@ foreach( program ectrans-benchmark ectrans-benchmark-ifs )
     foreach( prec dp sp )
       if( HAVE_${prec} )
             ecbuild_add_executable( TARGET  ${program}-gpu-${prec}
-                                    SOURCES ${program}.F90
+                                    SOURCES ${program}.F90 ${analytic_test_files}
                                     LINKER_LANGUAGE Fortran
                                     LIBS
                                       fiat
