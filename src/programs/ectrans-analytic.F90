@@ -123,9 +123,6 @@ real(kind=jprd) :: ztstepmax1, ztstepmin1, ztstepavg1, ztstepmed1
 real(kind=jprd) :: ztstepmax2, ztstepmin2, ztstepavg2, ztstepmed2
 real(kind=jprd), allocatable :: ztstep(:), ztstep1(:), ztstep2(:)
 
-real(kind=jprb), allocatable :: znormsp(:), znormsp1(:), znormdiv(:), znormdiv1(:)
-real(kind=jprb), allocatable :: znormvor(:), znormvor1(:), znormt(:), znormt1(:)
-
 ! Grid-point space data structures
 real(kind=jprb), allocatable, target :: zgmv   (:,:,:,:) ! Multilevel fields at t and t-dt
 real(kind=jprb), allocatable, target :: zgmvs  (:,:,:)   ! Single level fields at t and t-dt
@@ -159,7 +156,6 @@ logical :: lvordiv = .false.
 logical :: lscders = .false.
 logical :: luvders = .false.
 logical :: ltest_all = .false.
-logical :: lprint_norms = .false. ! Calculate and print spectral norms
 logical :: lwrite_errors = .true. ! Write error files for all tested wavenumbers
 real(kind=jprd) :: rtolerance = 1e-9 ! maximum relative lmax error tolerance for
                                      ! passing analytyic solution tests in double precision
@@ -238,6 +234,9 @@ integer, external :: ec_mpirank
 logical :: luse_mpi = .true.
 
 character(len=16) :: cgrid = ''
+character(len=50) :: cBinID = ''  ! binary ID (normally everything after "-analytic-"). This
+                                  ! is used to create unique file names for the error files
+                                  ! which include information about usage of CPU/GPU, OpenACC/OpenMP, ...
 
 !===================================================================================================
 
@@ -254,7 +253,8 @@ luse_mpi = detect_mpirun()
 if(jprb==jprm) rtolerance = 1e-3 ! tolerance for single precision
 ! Setup
 call get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, lscders, luvders, &
-  & luseflt, nproma, verbosity, ltest_all, lprint_norms, lwrite_errors, nprtrv, nprtrw, ntotal, nzonal, limag, rtolerance)
+  & luseflt, nproma, verbosity, ltest_all, lwrite_errors, nprtrv, nprtrw, ntotal, nzonal, limag, &
+  & rtolerance, cBinID)
 if (cgrid == '') cgrid = cubic_full_grid(nsmax)!cubic_octahedral_gaussian_grid(nsmax)
 call parse_grid(cgrid, ndgl, nloen)
 nflevg = nlev
@@ -538,14 +538,14 @@ allocate(zsph_analytic(nproma,ngpblks),zu_analytic(nproma,ngpblks), &
   & znsde_analytic(nproma,ngpblks),nlatidxs(nproma,ngpblks),zsinlats(ndgl))
 ! Compute geographic longitude gelam and latitude gelat and index array nlatidxs(nproma,ngpblks):
 call analytic_init(nproma, ngpblks, ndgl, n_regions_ns, n_regions_ew, nloen)
-call init_check_fields(lwrite_errors, nsmax, myproc, nproc, cgrid)
+call init_check_fields(lwrite_errors, nsmax, myproc, nproc, cgrid, cBinID)
 call buffer_legendre_polynomials_supolf(nsmax)
 ! Check correctness of Legendre coefficients:
 if(nproc==1) then
   ! This test is currently only done for nproc==1. For nproc>1 the ectrans library does not correctly
   ! return all the Legendre coefficients. This should be fixed in the future.
   call buffer_legendre_polynomials_ectrans(nsmax, ndgl)
-  rlmax_error_leg = check_legendre_polynomials(rtolerance, lwrite_errors, nsmax, myproc, nproc, ndgl, cgrid, nout)
+  rlmax_error_leg = check_legendre_polynomials(rtolerance, lwrite_errors, nsmax, myproc, nproc, ndgl, cgrid, cBinID, nout)
 end if
 
 if (iters <= 0) call abor1('transform_test:iters <= 0')
@@ -642,7 +642,7 @@ do n = 0,nsmax
               & nfld, jstep, m, n, li, real(zreel,kind=jprd), real(zgp2,kind=jprd), &
               & real(zgp3a,kind=jprd), real(zgpuv,kind=jprd), zsph_analytic, znsde_analytic, &
               & zewde_analytic, zu_analytic, zv_analytic, zuder_analytic, zvder_analytic, nout, &
-              & nsmax, luse_mpi, ngptotg, lscders, lvordiv, luvders, myproc, nproc, cgrid))
+              & nsmax, luse_mpi, ngptotg, lscders, lvordiv, luvders, myproc, nproc, cgrid, cBinID))
 
             !=================================================================================================
             ! Do direct transform
@@ -829,8 +829,8 @@ end subroutine
 !===================================================================================================
 
 subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, lscders, luvders, &
-  &                                   luseflt, nproma, verbosity, ltest_all, lprint_norms, lwrite_errors, &
-  &                                   nprtrv, nprtrw, ntotal, nzonal, limag, rtolerance)
+  &                                   luseflt, nproma, verbosity, ltest_all, lwrite_errors, &
+  &                                   nprtrv, nprtrw, ntotal, nzonal, limag, rtolerance, cBinID)
 
   integer, intent(inout) :: nsmax           ! Spectral truncation
   character(len=16), intent(inout) :: cgrid ! Grid
@@ -844,7 +844,6 @@ subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, 
   integer, intent(inout) :: nproma          ! NPROMA
   integer, intent(inout) :: verbosity       ! Level of verbosity
   logical, intent(inout) :: ltest_all       ! Test all wavenumbers up to truncation
-  logical, intent(inout) :: lprint_norms    ! Calculate and print spectral norms of fields
   logical, intent(inout) :: lwrite_errors   ! Write error files for all tested wavenumbers
   integer, intent(inout) :: nprtrv          ! Size of V set (spectral decomposition)
   integer, intent(inout) :: nprtrw          ! Size of W set (spectral decomposition)
@@ -852,11 +851,31 @@ subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, 
   integer, intent(inout) :: nzonal          ! zonal wavenumber to be tested
   logical, intent(inout) :: limag           ! test imaginary part
   real(jprd), intent(inout) :: rtolerance      ! relative error tolerance for analytic solutions
+  character(len=50), intent(out) :: cBinID  ! binary ID (normally everything after "-analytic-"). This
+                                            ! is used to create unique file names for the error files
+                                            ! which include information about usage of CPU/GPU, OpenACC/OpenMP, ...
 
   character(len=128) :: carg          ! Storage variable for command line arguments
   integer            :: iarg = 1      ! Argument index
   integer            :: stat          ! For storing success status of string->integer conversion
   integer            :: myproc
+  integer            :: idx
+  character(len=20) :: searchstring
+
+  ! Extract information from the binary name and return it in cBinID:
+  call get_command_argument(0, carg)
+  searchstring = "-analytic-"
+  idx = index(carg, trim(searchstring), .true.)
+  if (idx==0) then ! did not find "-analytic-" => take the entire binary name
+    searchstring = "/"
+    idx = index(carg, trim(searchstring), .true.)
+    ! if there is no "/" => fine, we can take the entire binary name
+  end if
+  cBinID = trim(carg(idx+len(trim(searchstring)):))
+  ! And just in case someone added something like ".exe" to the binary name:
+  searchstring = "."
+  idx = index(cBinID, trim(searchstring), .false.)
+  if (idx>2) cBinID = cBinID(1:idx-1)
 
   do while (iarg <= command_argument_count())
     call get_command_argument(iarg, carg)
@@ -896,7 +915,6 @@ subroutine get_command_line_arguments(nsmax, cgrid, iters, nfld, nlev, lvordiv, 
       case('--nproma'); nproma = get_int_value('--nproma', iarg)
       case('--dump-values'); ldump_values = .true.
       case('--test-all'); ltest_all = .true.
-      case('--norms'); lprint_norms = .true.
       case('--errorfiles'); lwrite_errors = .true.
       case('--nprtrv'); nprtrv = get_int_value('--nprtrv', iarg)
       case('--nprtrw'); nprtrw = get_int_value('--nprtrw', iarg)
@@ -969,27 +987,21 @@ subroutine print_help(unit)
   write(nout, "(a)") ""
 
   if (jprb == jprd) then
-    write(nout, "(a)") "NAME    ectrans-benchmark-dp"
+    write(nout, "(a)") "NAME    ectrans-analytic-dp"
   else
-    write(nout, "(a)") "NAME    ectrans-benchmark-sp"
+    write(nout, "(a)") "NAME    ectrans-analytic-sp"
   end if
   write(nout, "(a)") ""
 
   write(nout, "(a)") "DESCRIPTION"
-  write(nout, "(a)") "        This program tests ecTrans by transforming fields back and forth&
-    & between spectral "
-  if (jprb == jprd) then
-    write(nout, "(a)") "        space and grid-point space (double-precision version)"
-  else
-    write(nout, "(a)") "        space and grid-point space (single-precision version)"
-  end if
+  write(nout, "(a)") "        This program tests ecTrans by using analytic solutions."
   write(nout, "(a)") ""
 
   write(nout, "(a)") "USAGE"
   if (jprb == jprd) then
-    write(nout, "(a)") "        ectrans-benchmark-dp [options]"
+    write(nout, "(a)") "        ectrans-analytic-dp [options]"
   else
-    write(nout, "(a)") "        ectrans-benchmark-sp [options]"
+    write(nout, "(a)") "        ectrans-analytic-sp [options]"
   end if
   write(nout, "(a)") ""
 
@@ -997,35 +1009,29 @@ subroutine print_help(unit)
   write(nout, "(a)") "    -h, --help          Print this message"
   write(nout, "(a)") "    -v                  Run with verbose output"
   write(nout, "(a)") "    -t, --truncation T  Run with this triangular spectral truncation"
-  write(nout, "(a)") "                        (default = 79)"
+  write(nout, "(a)") "                        (default = 21)"
   write(nout, "(a)") "    -g, --grid GRID     Run with this grid. Possible values: O<N>, F<N>"
   write(nout, "(a)") "                        If not specified, O<N> is used with N=truncation+1"
   write(nout, "(a)") "                        (cubic relation)"
   write(nout, "(a)") "    -n, --niter NITER   Run for this many inverse/direct transform"
-  write(nout, "(a)") "                        iterations (default = 10)"
+  write(nout, "(a)") "                        iterations (default = 2)"
   write(nout, "(a)") "    -f, --nfld NFLD     Number of scalar fields (default = 1)"
   write(nout, "(a)") "    -l, --nlev NLEV     Number of vertical levels (default = 1)"
   write(nout, "(a)") "    --nzonal NZONAL     Zonal wavenumber that is tested (default = truncation)"
   write(nout, "(a)") "    --ntotal NTOTAL     Total wavenumber that is tested (default = truncation)"
-  write(nout, "(a)") "    --imaginary         Test imaginary part"
+  write(nout, "(a)") "    --imaginary         Test imaginary part (default = false)"
   write(nout, "(a)") "    --test-all          Test all wavenumbers up to (including) truncation"
   write(nout, "(a)") "                        This overwrites --nzonal, --ntotal and --imaginary"
   write(nout, "(a)") "    --tolerance         Test is passed if largest relative lmax-error is"
   write(nout, "(a)") "                        smaller than this tolerance (real value)"
-  write(nout, "(a)") "    --vordiv            Also transform vorticity-divergence to wind"
+  write(nout, "(a)") "    --vordiv            Also transform vorticity-divergence to wind (default off)"
   write(nout, "(a)") "    --scders            Compute scalar derivatives (default off)"
   write(nout, "(a)") "    --uvders            Compute uv East-West derivatives (default off). Only"
   write(nout, "(a)") "                        when also --vordiv is given"
   write(nout, "(a)") "    --flt               Run with fast Legendre transforms (default off)"
   write(nout, "(a)") "    --nproma NPROMA     Run with NPROMA (default no blocking: NPROMA=ngptot)"
-  write(nout, "(a)") "    --norms             Calculate and print spectral norms of transformed"
-  write(nout, "(a)") "                        fields"
-  write(nout, "(a)") "                        The computation of spectral norms will skew overall"
-  write(nout, "(a)") "                        timings"
   write(nout, "(a)") "    --nprtrv            Size of V set in spectral decomposition"
   write(nout, "(a)") "    --nprtrw            Size of W set in spectral decomposition"
-  write(nout, "(a)") "    -c, --check VALUE   The multiplier of the machine epsilon used as a"
-  write(nout, "(a)") "                        tolerance for correctness checking"
   write(nout, "(a)") ""
 
 end subroutine print_help
