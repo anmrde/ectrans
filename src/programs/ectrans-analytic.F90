@@ -1097,7 +1097,7 @@ end subroutine initialize_spectral_arrays
 subroutine initialize_2d_spectral_field(field, kindex)
 
   real(kind=jprb), intent(inout) :: field(:) ! Field to initialize
-  integer,         intent(out)   :: kindex   ! return index that is set to one for testing result
+  integer,         intent(in)   :: kindex   ! return index that is set to one for testing result
 
   ! First initialise all spectral coefficients to zero
   field(:) = 0.0
