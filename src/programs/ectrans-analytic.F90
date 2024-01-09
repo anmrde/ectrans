@@ -71,11 +71,12 @@ use mpl_module
 use yomhook, only : dr_hook_init
 use analytic_solutions_mod, only: analytic_init, analytic_end, &
 & buffer_legendre_polynomials_supolf, &
-& buffer_legendre_polynomials_ectrans, check_legendre_polynomials, &
+& buffer_legendre_polynomials_ectrans, &
 & compute_analytic_solution, compute_analytic_eastwest_derivative, &
-& compute_analytic_northsouth_derivative, gelam, gelat, init_check_fields, &
-& close_check_fields, check_gp_fields, check_sp_fields, compute_analytic_uv, &
-& compute_analytic_uv_derivative_ew
+& compute_analytic_northsouth_derivative, gelam, gelat, &
+& compute_analytic_uv_derivative_ew, compute_analytic_uv
+use check_results_mod, only: init_check_fields, check_legendre_polynomials, &
+& close_check_fields, check_gp_fields, check_sp_fields
 
 implicit none
 
@@ -181,7 +182,7 @@ integer(kind=jpim) :: nproc ! Number of procs
 integer(kind=jpim) :: nthread
 integer(kind=jpim) :: nprgpns ! Grid-point decomp
 integer(kind=jpim) :: nprgpew ! Grid-point decomp
-integer(kind=jpim) :: nprtrv = 1 ! Spectral decomp
+integer(kind=jpim) :: nprtrv = 0 ! Spectral decomp
 integer(kind=jpim) :: nprtrw = 0 ! Spectral decomp
 integer(kind=jpim) :: nspecresmin = 80 ! Minimum spectral resolution, for controlling nprtrw
 integer(kind=jpim) :: mysetv
