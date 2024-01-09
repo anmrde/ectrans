@@ -71,11 +71,12 @@ use mpl_module
 use yomhook, only : dr_hook_init
 use analytic_solutions_mod, only: analytic_init, analytic_end, &
 & buffer_legendre_polynomials_supolf, &
-& buffer_legendre_polynomials_ectrans, check_legendre_polynomials, &
+& buffer_legendre_polynomials_ectrans, &
 & compute_analytic_solution, compute_analytic_eastwest_derivative, &
-& compute_analytic_northsouth_derivative, gelam, gelat, init_check_fields, &
-& close_check_fields, check_gp_fields, check_sp_fields, compute_analytic_uv, &
-& compute_analytic_uv_derivative_ew
+& compute_analytic_northsouth_derivative, gelam, gelat, &
+& compute_analytic_uv_derivative_ew, compute_analytic_uv
+use check_results_mod, only: init_check_fields, check_legendre_polynomials, &
+& close_check_fields, check_gp_fields, check_sp_fields
 
 implicit none
 
@@ -572,7 +573,7 @@ do n = 0,nsmax
     do imag_idx = 0,1
       li = (imag_idx == 1) ! test imaginary part
       if(((.not. li) .and. (m == 0)) .or. (m>0)) then ! there is no imaginary part for m==0
-        if(ltest_all .or. (m == nzonal .and. n == ntotal .and. li == limag)) then ! check if this wavenumber should be tested
+        if(ltest_all .or. ((m == nzonal) .and. (n == ntotal) .and. (li .eqv. limag))) then ! check if this wavenumber should be tested
 
           ! Initialize arrays
           zreel(:,:,:)  = 0._jprb
