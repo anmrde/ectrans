@@ -120,8 +120,10 @@ module analytic_solutions_mod
   ! ectrans is computing the same values like the copied supolf_test_mod. They should not be used to
   ! compute the analytic solutions since then we would not detect bugs introduced in the computation
   ! of the Legendre polynomials inside ectrans.
-  ! Caution: ectrans only returns the Legendre polynomials in single precision!!!
-  !          (supolf_test returns them in double precision)
+  ! Caution: in the single precision version ectrans only returns the Legendre polynomials in single
+  !          precision! To compute the errors as accurately as possible the errors should always be
+  !          calculated from the Legendre coefficients in double precision (which is the case as 
+  !          long as supolf_test is used)
   !===================================================================================================
 
   subroutine buffer_legendre_polynomials_ectrans(nsmax, ndgl)
@@ -560,9 +562,14 @@ module analytic_solutions_mod
   ! lwrite_errors==.true. it also writes the coefficients where the error exceeds the tolerance to file.
   ! This function works currently only for nproc==1. For nproc>1 the ectrans library does not correctly
   ! return all Legendre coefficients.
+  !
+  ! Even if the errors of the Legendre coefficients exceed the tolerance the code currently continues
+  ! to run. As long as the errors of inv_trans and dir_trans are small it should be fine. For nproc>1
+  ! ectrans returns only some of the coefficients correctly even though the overall results are correct.
   !===================================================================================================
   
-  function check_legendre_polynomials(rtolerance, lwrite_errors, nsmax, myproc, nproc, ndgl, cgrid, nout) result(rlmax_error)
+  function check_legendre_polynomials(rtolerance, lwrite_errors, nsmax, myproc, nproc, ndgl, &
+    & cgrid, cBinID, nout) result(rlmax_error)
   
     use parkind1, only: jprb, jprd
 
@@ -575,26 +582,17 @@ module analytic_solutions_mod
     character(len=16), intent(in)  :: cgrid
     real(kind=jprd), intent(out) :: rlmax_error
     integer(kind=jpim), intent(in) :: nout
+    character(len=50), intent(in) :: cBinID   ! binary ID (normally everything in the name of the binary
+        ! after "-analytic-"). This is used to create unique file names for the error files
+        ! which include information about usage of CPU/GPU, OpenACC/OpenMP, ...
     real(kind=jprd) :: rlmax_quo, rlmax_fac
     character(len=100) :: filename
-    character(len=2)  :: precision
     integer(kind=jpim) :: ilat, jm, jn
-    logical :: lprint
+    logical :: lprint, linitialized
 
     if (myproc == 1) then
+      linitialized = .false.
       rlmax_error = 0.0_jprd
-      if(lwrite_errors) then
-        if (jprb == jprd) then
-          precision = 'dp'
-        else
-          precision = 'sp'
-        end if
-        write(filename,'(3a,i0,3a,i0,a)')'errors-',precision,'-legendre_T',nsmax,'_',trim(cgrid),'_nproc',nproc,'.txt'
-        open( 30, file = filename, status='replace')
-        write(30,'("Legendre coefficients")')
-        write(30,'("ilat   m   n ┃     supolf    ectrans      error ")')
-        write(30,'("━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿")')
-      end if
       rlmax_quo = maxval(abs(legpolys))
       if(rlmax_quo == 0.0) rlmax_quo = maxval(abs(legpolys_ectrans))
       rlmax_fac = 1.0_jprd
@@ -608,7 +606,17 @@ module analytic_solutions_mod
                 if(abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))*rlmax_fac > rtolerance) then
                   lprint = .true.
                 end if
-                if(lprint .and. lwrite_errors) write(30,'(i4,i4,i4," ┃",e11.3,e11.3,e11.3)') ilat, jm, jn, legpolys(ilat,jm,jn), legpolys_ectrans(ilat,jm,jn),abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))*rlmax_fac
+                if(lprint .and. lwrite_errors) then
+                  if(.not. linitialized) then
+                    write(filename,'(3a,i0,3a,i0,a)')'errors-',trim(cBinID),'-legendre_T',nsmax,'_',trim(cgrid),'_nproc',nproc,'.txt'
+                    open( 30, file = filename, status='replace')
+                    write(30,'("Legendre coefficients")')
+                    write(30,'("ilat   m   n ┃     supolf    ectrans      error ")')
+                    write(30,'("━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿")')
+                    linitialized = .true.
+                  endif            
+                  write(30,'(i4,i4,i4," ┃",e11.3,e11.3,e11.3)') ilat, jm, jn, legpolys(ilat,jm,jn), legpolys_ectrans(ilat,jm,jn),abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))*rlmax_fac
+                end if
                 rlmax_error = max(rlmax_error, abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))*rlmax_fac)
               else
                 if(legpolys_ectrans(ilat,jm,jn)==legpolys_ectrans(ilat,jm,jn)) write(nout,'("check_legendre_polynomials: ilat=",i4," jm=",i4," jn=",i4," legpolys_ectrans=",e11.3," Issue with Legendre coefficients computed in analytic_solutions_mod.F90 but will continue.")') ilat, jm, jn, legpolys_ectrans(ilat,jm,jn)
@@ -628,7 +636,7 @@ module analytic_solutions_mod
   ! Initialize the files in which the errors are written.
   !===================================================================================================
 
-  subroutine init_check_fields(lwrite_errors, nsmax, myproc, nproc, cgrid)
+  subroutine init_check_fields(lwrite_errors, nsmax, myproc, nproc, cgrid, cBinID)
 
     use parkind1, only: jprb, jprd
 
@@ -638,18 +646,15 @@ module analytic_solutions_mod
     integer(kind=jpim), intent(in) :: nsmax
     integer(kind=jpim), intent(in) :: myproc, nproc
     character(len=16), intent(in)  :: cgrid
+    character(len=50), intent(in) :: cBinID   ! binary ID (normally everything in the name of the binary
+        ! after "-analytic-"). This is used to create unique file names for the error files
+        ! which include information about usage of CPU/GPU, OpenACC/OpenMP, ...
     character(len=100) :: filename
-    character(len=2)  :: precision
 
     if (myproc == 1) then
-      if (jprb == jprd) then
-        precision = 'dp'
-      else
-        precision = 'sp'
-      end if
-      write(filename,'(3a,i0,3a,i0,a)')'errors-',precision,'-gridpoint_T',nsmax,'_',trim(cgrid),'_nproc',nproc,'.txt'
+      write(filename,'(3a,i0,3a,i0,a)')'errors-',trim(cBinID),'-gridpoint_T',nsmax,'_',trim(cgrid),'_nproc',nproc,'.txt'
       open(40, file = filename, status='replace')
-      write(filename,'(3a,i0,3a,i0,a)')'errors-',precision,'-spectral_T',nsmax,'_',trim(cgrid),'_nproc',nproc,'.txt'
+      write(filename,'(3a,i0,3a,i0,a)')'errors-',trim(cBinID),'-spectral_T',nsmax,'_',trim(cgrid),'_nproc',nproc,'.txt'
       open(60, file = filename, status='replace')
       if(lwrite_errors) then
         write(40,'("lmax-error in grid point space")')
@@ -698,7 +703,8 @@ module analytic_solutions_mod
 
   function check_gp_fields(rtolerance, lwrite_errors, nflevg, nfld, jstep, nzonal, ntotal, &
     & limag, zreel, zgp2, zgp3a, zgpuv, zsph_analytic, znsde_analytic, zewde_analytic, &
-    & zu_analytic, zv_analytic, zuder_analytic, zvder_analytic, nout, nsmax, luse_mpi, ngptotg, lscders, lvordiv, luvders, myproc, nproc, cgrid) result(rlmax_error)
+    & zu_analytic, zv_analytic, zuder_analytic, zvder_analytic, nout, nsmax, luse_mpi, &
+    & ngptotg, lscders, lvordiv, luvders, myproc, nproc, cgrid, cBinID) result(rlmax_error)
 
     use parkind1, only: jprb, jprd
     use mpl_module
@@ -714,6 +720,9 @@ module analytic_solutions_mod
     real(kind=jprd), intent(out) :: rlmax_error
     integer(kind=jpim), intent(in) :: nout, nsmax, ngptotg, myproc, nproc
     character(len=16), intent(in)  :: cgrid
+    character(len=50), intent(in) :: cBinID   ! binary ID (normally everything in the name of the binary
+        ! after "-analytic-"). This is used to create unique file names for the error files
+        ! which include information about usage of CPU/GPU, OpenACC/OpenMP, ...
     logical, intent(in) :: luse_mpi, lscders, lvordiv, luvders
     real(kind=jprd) :: rlmax_quo, rlmax_nsde_quo, rlmax_ewde_quo, rlmax_u_quo, rlmax_v_quo, rlmax_uder_quo, rlmax_vder_quo, rlmax_fac, rlmax_nsde_fac, rlmax_ewde_fac, rlmax_u_fac, rlmax_v_fac, rlmax_uder_fac, rlmax_vder_fac
     real(kind=jprd) :: rlmax_errors(nflevg*nfld+2), rlmax_errors_nsde(nflevg*nfld+2), rlmax_errors_ewde(nflevg*nfld+2), rlmax_errors_uv(2*nflevg), rlmax_errors_uvder(2*nflevg)
@@ -721,13 +730,6 @@ module analytic_solutions_mod
     logical :: lpassed(nflevg*nfld+2), lpassed_nsde(nflevg*nfld+2), lpassed_ewde(nflevg*nfld+2), lpassed_all
     integer :: i, j, ntests
     character(len=100) :: filename
-    character(len=2)  :: precision
-
-    if (jprb == jprd) then
-      precision = 'dp'
-    else
-      precision = 'sp'
-    end if
 
     ntests = nflevg*nfld+2
 
@@ -915,7 +917,7 @@ module analytic_solutions_mod
 
     if(.not. lpassed_all) then
       if(lwrite_errors) then
-        write(filename,'(3a,i0,3a,i0,a,i0,a,i0,a,i0,a)')'test-failed-',precision,'-gridpoint_T',nsmax,'_',trim(cgrid),'_proc',myproc,'_',nproc,'_n',ntotal,'_m',nzonal,'.txt'
+        write(filename,'(3a,i0,3a,i0,a,i0,a,i0,a,i0,a)')'test-failed-',trim(cBinID),'-gridpoint_T',nsmax,'_',trim(cgrid),'_proc',myproc,'_',nproc,'_n',ntotal,'_m',nzonal,'.txt'
         open(50, file = filename, status='replace')
         write(50,'("myproc=",i4," m=",i4," n=",i4," jstep=",i4," imag=",L1)')myproc,nzonal,ntotal,jstep,limag
         write(50,'(a,a)')"                     ┃                                                        │                 north-south derivatives                │", &

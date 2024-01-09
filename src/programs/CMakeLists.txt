@@ -49,9 +49,6 @@ foreach( program ectrans-benchmark ectrans-benchmark-ifs ectrans-analytic )
                                   parkind_${prec}
                                   trans_${prec}
         )
-        if( prec STREQUAL sp )
-          target_compile_definitions( ${program}-${prec} PRIVATE TRANS_SINGLE )
-        endif()                    
       endif()
     endforeach( prec)
   endif()
@@ -67,9 +64,6 @@ foreach( program ectrans-benchmark ectrans-benchmark-ifs ectrans-analytic )
                                       parkind_${prec}
                                       trans_gpu_${prec}
             )
-            if( prec STREQUAL sp )
-              target_compile_definitions( ${program}-gpu-${prec} PRIVATE TRANS_SINGLE )
-            endif()                    
       endif()
  endforeach( prec )
   endif( HAVE_GPU )
