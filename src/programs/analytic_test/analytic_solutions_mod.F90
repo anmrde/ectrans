@@ -105,12 +105,12 @@ module analytic_solutions_mod
 
     call ini_pol_test(nsmax+1)
     do jgl=nfirstlat, nlastlat
-      do km=0,nsmax+1
-        call supolf_test(km, nsmax+1, zmu(jgl), legpolys(jgl,km,:))
+      do km=0,nmeng(jgl)
+        call supolf_test(km, nmeng(jgl)+1, zmu(jgl), legpolys(jgl,km,0:nmeng(jgl)+1))
+        ! going only to nmeng(jgl) with km and inside the call makes sure that we skip the highest
+        ! wavenumbers at high latitudes for the reduced grid
       end do
     end do
-  
-    call legendre_polynomials_adjust_reduced_grid(nsmax)
   
   end subroutine buffer_legendre_polynomials_supolf
   
@@ -158,30 +158,6 @@ module analytic_solutions_mod
   end subroutine buffer_legendre_polynomials_ectrans
   
   !===================================================================================================
-  ! Subroutine legendre_polynomials_adjust_reduced_grid:
-  ! Set Legendre coefficients to zero for those high wavenumbers which should not be computed for the
-  ! reduced grid. (The reduced number of points along the higher latitudes in the reduced grid cannot
-  ! represent these high wavenumbers!)
-  !===================================================================================================
-  
-  subroutine legendre_polynomials_adjust_reduced_grid(nsmax)
-
-    implicit none
-
-    integer(kind=jpim), intent(in) :: nsmax
-    integer(kind=jpim) :: ilat, jm, jn
-
-    do ilat=nfirstlat, nlastlat
-      do jm=nmeng(ilat)+1,nsmax
-        do jn=jm,nsmax
-          legpolys(ilat,jm,jn) = 0.0
-        end do
-      end do
-    end do
-
-  end subroutine legendre_polynomials_adjust_reduced_grid
-
-  !===================================================================================================
   ! Subroutine compute_analytic_solution:
   ! Compute analytic solution for a specific total wavenumber n and zonal wavenumber m by going through
   ! all points and using the point-wise function analytic_spherical_harmonic_point.
@@ -228,13 +204,9 @@ module analytic_solutions_mod
     logical, intent(in), value       :: imag
     real(jprd), intent(in), value    :: legPoly
     real(jprd) :: pointValue
-    real(jprd) :: sinlat, coslat, colat
     integer(jpim) :: abs_m
-    sinlat = sin(lat)
-    coslat = cos(lat)
     abs_m = abs(m)
     if(n<abs_m) call abor1("Error in analytic_spherical_harmonic_point: assertion (n >= abs_m) failed")
-    colat = z_pi/2.0 - lat
     if (m == 0) then
       if (imag) then
         pointValue = 0.0

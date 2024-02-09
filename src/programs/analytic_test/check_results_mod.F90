@@ -26,7 +26,7 @@ module check_results_mod
     & cgrid, cBinID, nout) result(rlmax_error)
   
     use parkind1, only: jprb, jprd
-    use analytic_solutions_mod, only: legpolys, legpolys_ectrans, nfirstlat, nlastlat
+    use analytic_solutions_mod, only: legpolys, legpolys_ectrans, nfirstlat, nlastlat, nmeng
 
     implicit none
   
@@ -54,8 +54,8 @@ module check_results_mod
       if(rlmax_quo>0.0) rlmax_fac = 1.0_jprd/rlmax_quo
       do ilat=nfirstlat, nlastlat
         if(ilat<ndgl/2) then
-          do jm=0,nsmax
-            do jn=jm,nsmax
+          do jm=0,nmeng(ilat)
+            do jn=jm,nmeng(ilat)
               lprint = .false.
               if(legpolys(ilat,jm,jn)==legpolys(ilat,jm,jn) .and. legpolys_ectrans(ilat,jm,jn)==legpolys_ectrans(ilat,jm,jn)) then ! just to be sure that there are no nans
                 if(abs(legpolys(ilat,jm,jn)-legpolys_ectrans(ilat,jm,jn))*rlmax_fac > rtolerance) then
@@ -390,8 +390,8 @@ module check_results_mod
               & abs(zreel(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, abs(zgp2(i,3,j)-zewde_analytic(i,j))*rlmax_ewde_fac, &
               & maxval(abs((zgp3a(i,:,3,j)-zewde_analytic(i,j))))*rlmax_ewde_fac, maxval(abs(zgpuv(i,:,1,j)-zu_analytic(i,j)))*rlmax_u_fac, &
               & maxval(abs(zgpuv(i,:,2,j)-zv_analytic(i,j)))*rlmax_v_fac) > rtolerance) then
-              write(50,'(2f10.3," ┃",5e11.3," │",5e11.3," │",5e11.3," │",3e11.3," │",3e11.3," │",3e11.3," │",3e11.3)') &
-                & gelat(i,  j)*180/z_pi,gelam(i,j)*180/z_pi, &
+              write(50,'(2i4,2f10.3," ┃",5e15.7," │",5e11.3," │",5e11.3," │",3e11.3," │",3e11.3," │",3e11.3," │",3e11.3)') &
+                & i, j, gelat(i,  j)*180/z_pi,gelam(i,j)*180/z_pi, &
                 & abs(zsph_analytic(i,j)), abs(zreel(i,1,j)), abs(zgp2(i,1,j)), maxval(abs(zgp3a(i,:,1,j))), &
                 & max(         (zreel(i,  1,j)-zsph_analytic(i,j) )*rlmax_fac, &
                 &               (zgp2(i,  1,j)-zsph_analytic(i,j) )*rlmax_fac, &
